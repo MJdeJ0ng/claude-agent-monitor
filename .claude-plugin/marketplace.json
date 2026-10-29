@@ -1,0 +1,5 @@
+{
+  "name": "maarten-local-mods",
+  "owner": { "name": "Maarten de Jong" },
+  "plugins": [{ "name": "agent-monitor", "source": "./" }]
+}

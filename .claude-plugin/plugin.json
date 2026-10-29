@@ -1,0 +1,7 @@
+{
+  "name": "agent-monitor",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Live pane showing running agents and sub-agents, their tasks, skills and handovers.",
+  "types": "./types/index.d.ts"
+}
