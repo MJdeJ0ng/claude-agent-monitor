@@ -40,7 +40,7 @@ test('the main session working shows in the header', async ($, on) => {
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect((await ui.find({ type: 'Text', text: /Storming the beaches/ }))?.text).toContain('Storming the beaches')
+    expect(await ui.find({ type: 'Text', text: /Storming the beaches|Invading Poland|Island-hopping across the Pacific/ })).toBeDefined()
     expect((await ui.find({ type: 'Text', text: /now: Bash/ }))?.text).toContain('now: Bash')
     await ui.unmount()
   }
@@ -59,7 +59,7 @@ test('an agent and its sub-agent show live, then move to Done', async ($, on) =>
     expect(await ui.find({ type: 'Text', text: /^ AGENT $/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^ SUB-AGENT $/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Find auth/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /Cracking Enigma/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Cracking Enigma|Decoding JN-25 at Station Hypo|Scouting from a PBY Catalina/ })).toBeDefined()
     await ui.unmount()
   }
 
@@ -149,7 +149,7 @@ test("a child session's agents and skills show under its row", async ($, on) => 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ type: 'Text', text: /Refine login/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Scan the login flow/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Cracking Enigma/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Cracking Enigma|Decoding JN-25 at Station Hypo|Scouting from a PBY Catalina/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /tdd-workflow/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /dataviz/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^ SUB-AGENT $/ })).toBeDefined()

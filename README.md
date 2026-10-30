@@ -8,7 +8,7 @@ A live pane inside Claude Code that shows which agents and sub-agents are runnin
 - **Skills**: which skill was used, by whom, and when.
 - **Sessions**: sessions started from this one (an orchestrator's workers) are listed with their status and PR; where they run the mod too, their own agents, sub-agents, skills and current activity show under their row. Each session shares this through a small file in `~/.claude/agent-monitor-live/`.
 
-The wording has a light WW2 flavour from the Allied side: the main session is the War Room, a search is "Cracking Enigma", a shell command is "Storming the beaches", a finished agent is "mission accomplished".
+The wording has a light WW2 flavour, from Europe and the Pacific: the main session is the War Room, a search is "Cracking Enigma" or "Decoding JN-25 at Station Hypo", a shell command is "Storming the beaches" or "Invading Poland", loading a skill is "Annexing Czechoslovakia", starting an agent is "Assembling the fleet", and a finished agent is "mission accomplished".
 
 Open it with the `/agent-monitor` command; it also opens at session start and updates as work happens.
 

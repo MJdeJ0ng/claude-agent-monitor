@@ -75,19 +75,23 @@ const AVATARS: [RegExp, string][] = [
   [/guide|help/i, '📚'],
 ]
 
-// What an agent is "doing", by the tool it last reached for.
-const VERBS: [RegExp, string][] = [
-  [/^(Grep|Glob)$/, 'Cracking Enigma'],
-  [/^Read$/, 'Reading the dispatches'],
-  [/^(Edit|Write|NotebookEdit)$/, 'Typing away at Bletchley Park'],
-  [/^(Bash|PowerShell)$/, 'Storming the beaches'],
-  [/^Web/, 'Tuning in to Radio London'],
-  [/^Agent$/, 'Calling in the Yanks'],
-  [/^Skill$/, 'Consulting the War Cabinet'],
-  [/^SendMessage$/, 'Wiring a telegram'],
-  [/plan|Todo/i, 'Drawing up Operation Overlord'],
-  [/^mcp__/, 'Ringing Washington'],
+// What an agent is "doing", by the tool it last reached for: a few lines per
+// tool, from Europe and the Pacific. Each agent keeps one per tool (picked by
+// its id), so a line does not flicker between redraws.
+const VERBS: [RegExp, string[]][] = [
+  [/^(Grep|Glob)$/, ['Cracking Enigma', 'Decoding JN-25 at Station Hypo', 'Scouting from a PBY Catalina']],
+  [/^Read$/, ['Reading the dispatches', 'Listening to the Navajo code talkers']],
+  [/^(Edit|Write|NotebookEdit)$/, ['Typing away at Bletchley Park', 'Building airstrips with the Seabees']],
+  [/^(Bash|PowerShell)$/, ['Storming the beaches', 'Invading Poland', 'Island-hopping across the Pacific']],
+  [/^Web/, ['Tuning in to Radio London', 'Tuning in to Tokyo Rose']],
+  [/^Agent$/, ['Calling in the Yanks', 'Assembling the fleet']],
+  [/^Skill$/, ['Consulting the War Cabinet', 'Annexing Czechoslovakia']],
+  [/^SendMessage$/, ['Wiring a telegram', 'Signalling by Aldis lamp']],
+  [/plan|Todo/i, ['Drawing up Operation Overlord', 'Planning the Doolittle Raid']],
+  [/^mcp__/, ['Ringing Washington', 'Radioing Pearl Harbor']],
 ]
+const IDLE_VERBS = ['Keeping calm and carrying on', 'Holding Guadalcanal']
+const WARMUP_VERB = 'Mustering at Dover'
 
 // The argument that best says what a tool call was about.
 const DETAIL_KEYS = ['command', 'file_path', 'pattern', 'query', 'url', 'skill', 'description', 'to']
@@ -114,8 +118,12 @@ const hash = (text: string): number => [...text].reduce((h, c) => (h * 31 + c.ch
 
 const avatarOf = (type: string): string => AVATARS.find(([re]) => re.test(type))?.[1] ?? '🤖'
 const colorOf = (type: string): string => PALETTE[hash(type) % PALETTE.length] ?? 'cyan'
-const verbOf = (tool?: string): string =>
-  tool ? VERBS.find(([re]) => re.test(tool))?.[1] ?? 'Keeping calm and carrying on' : 'Mustering at Dover'
+const pick = (options: string[], seed: string): string => options[hash(seed) % options.length] ?? options[0] ?? ''
+const verbOf = (tool: string | undefined, seed: string): string => {
+  if (!tool) return WARMUP_VERB
+  const options = VERBS.find(([re]) => re.test(tool))?.[1] ?? IDLE_VERBS
+  return pick(options, `${seed}:${tool}`)
+}
 
 const detailOf = (input: Record<string, unknown>): string | undefined => {
   const key = DETAIL_KEYS.find(k => typeof input[k] === 'string' && input[k] !== '')
@@ -513,7 +521,7 @@ export const register: Register = on => {
       if (row.status === 'running') {
         return (
           <Text color={colorOf(row.type)}>
-            {spin} {verbOf(row.tool)}…
+            {spin} {verbOf(row.tool, row.id)}…
           </Text>
         )
       }
@@ -564,7 +572,7 @@ export const register: Register = on => {
             indented(
               lead,
               <Text color="yellow">
-                {spin} {verbOf(snap.mainTool)}…{snap.mainTool ? ` · now: ${snap.mainTool}` : ''}
+                {spin} {verbOf(snap.mainTool, s.id)}…{snap.mainTool ? ` · now: ${snap.mainTool}` : ''}
               </Text>,
               'truncate-end',
             )}
@@ -590,7 +598,7 @@ export const register: Register = on => {
                       </Text>{' '}
                       {isLive ? (
                         <Text color={colorOf(row.type)}>
-                          {spin} {verbOf(row.tool)}…
+                          {spin} {verbOf(row.tool, row.id)}…
                         </Text>
                       ) : row.status === 'running' ? (
                         <Text dimColor>? missing in action</Text>
@@ -623,7 +631,7 @@ export const register: Register = on => {
           </Text>
           {isMainBusy ? (
             <Text color="cyan">
-              {spin} {mainNow?.tool ? verbOf(mainNow.tool) : 'Keeping calm and carrying on'}…
+              {spin} {mainNow?.tool ? verbOf(mainNow.tool, MAIN) : pick(IDLE_VERBS, MAIN)}…
             </Text>
           ) : running > 0 ? (
             <Text color="cyan">{spin} Awaiting news from the front…</Text>
