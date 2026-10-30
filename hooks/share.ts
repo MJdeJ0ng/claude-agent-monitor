@@ -19,19 +19,23 @@ export function liveDirOf(pluginRoot: string): string {
   return `${base}/${LIVE_FOLDER}`
 }
 
-// This session's id as the app knows it (`local_…`), which is how the session
-// that started it names it. Only asked where the permission check allows it
-// without a dialog; undefined where it cannot be known.
-export async function resolveSelfId($: EngineInterface): Promise<string | undefined> {
+// This session as the app knows it: its id (`local_…`), which is how the
+// session that started it names it, and that starter's id, if any. Only asked
+// where the permission check allows it without a dialog.
+export type SelfInfo = { id: string; parentId?: string }
+
+export async function resolveSelf($: EngineInterface): Promise<SelfInfo | undefined> {
   try {
     const input = { session_id: 'self' }
     const { decision } = await $.tool.check({ tool: GET_SESSION_TOOL, input })
     if (decision !== 'allow') return undefined
     const res = await $.tool.call({ tool: GET_SESSION_TOOL, ...input })
     const text = 'text' in res && typeof res.text === 'string' ? res.text : ''
-    const parsed: unknown = JSON.parse(text)
-    const id = (parsed as { sessionId?: unknown }).sessionId
-    return typeof id === 'string' ? id : undefined
+    const parsed = JSON.parse(text) as { sessionId?: unknown; parentSessionId?: unknown; detached?: unknown }
+    if (typeof parsed.sessionId !== 'string') return undefined
+    const parentId =
+      typeof parsed.parentSessionId === 'string' && parsed.detached !== true ? parsed.parentSessionId : undefined
+    return { id: parsed.sessionId, parentId }
   } catch {
     return undefined
   }

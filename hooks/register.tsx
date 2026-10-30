@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ActivityEvent, AgentRow, AgentStatus, Handover, SessionRow, SessionSnapshot, ViewFilter } from '../types'
-import { readSnapshots, resolveSelfId, writeSnapshot } from './share'
+import { readSnapshots, resolveSelf, writeSnapshot } from './share'
 
 const PANE = 'agent-monitor'
 const MAIN = 'main'
@@ -313,12 +313,14 @@ export const register: Register = on => {
     // linked-session list is the only place that knows them, so poll it.
     void syncSessions($)
     $.clock.every(SESSION_POLL_MS, () => void syncSessions($))
-    // Let the session that started this one see inside it.
-    void resolveSelfId($).then(id => {
-      selfId = id
+    // Let the session that started this one see inside it. A session another
+    // one started is shown in its starter's pane, so it opens no pane of its
+    // own unless asked (/agent-monitor).
+    void resolveSelf($).then(self => {
+      selfId = self?.id
+      if (!self?.parentId) void $.ui.open({ id: PANE, title: 'Agents' })
     })
     $.clock.every(SHARE_MS, () => void shareSnapshot($))
-    void $.ui.open({ id: PANE, title: 'Agents' })
     return next(e)
   })
 
@@ -779,10 +781,10 @@ export const register: Register = on => {
     const tabs = (
       <Box gap={2} marginTop={1} flexWrap="wrap">
         <Button key="tab-live" variant={view === 'live' ? 'primary' : 'secondary'} onPress={setView('live')}>
-          ● Live ({running})
+          ● Live ({running + runningSessions})
         </Button>
         <Button key="tab-done" variant={view === 'done' ? 'primary' : 'secondary'} onPress={setView('done')}>
-          ✓ Done ({finished.length})
+          ✓ Done ({finished.length + childSessions.length - runningSessions})
         </Button>
       </Box>
     )

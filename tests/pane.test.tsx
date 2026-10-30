@@ -153,5 +153,26 @@ test("a child session's agents and skills show under its row", async ($, on) => 
   expect(await ui.find({ type: 'Text', text: /tdd-workflow/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /dataviz/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^ SUB-AGENT $/ })).toBeDefined()
+  expect((await ui.find({ key: 'tab-live' }))?.text).toContain('(1)')
   await ui.unmount()
+})
+
+test('a session another one started opens no pane of its own', async ($, on) => {
+  let opened = 0
+  on('clock.every', () => ({ value: undefined }))
+  on('command.register', () => ({ value: { command: 'agent-monitor' } }))
+  on('ui.open', () => {
+    opened += 1
+    return { value: { isPlaced: true } }
+  })
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('tool.check', () => ({ decision: 'allow' as const }))
+  on('tool.call', (_, e) =>
+    e.tool === 'mcp__ccd_session_mgmt__get_session'
+      ? { result: {}, text: JSON.stringify({ sessionId: 'local_child', parentSessionId: 'local_parent' }) }
+      : { result: {}, text: '[]' },
+  )
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.tool.call({ tool: 'Read', file_path: 'x' })
+  expect(opened).toBe(0)
 })
