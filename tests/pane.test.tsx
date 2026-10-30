@@ -40,8 +40,8 @@ test('the main session working shows in the header', async ($, on) => {
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect((await ui.find({ type: 'Text', text: /Ramt commando/ }))?.text).toContain('Ramt commando')
-    expect((await ui.find({ type: 'Text', text: /nu: Bash/ }))?.text).toContain('nu: Bash')
+    expect((await ui.find({ type: 'Text', text: /Storming the beaches/ }))?.text).toContain('Storming the beaches')
+    expect((await ui.find({ type: 'Text', text: /now: Bash/ }))?.text).toContain('now: Bash')
     await ui.unmount()
   }
 })
@@ -59,7 +59,7 @@ test('an agent and its sub-agent show live, then move to Done', async ($, on) =>
     expect(await ui.find({ type: 'Text', text: /^ AGENT $/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^ SUB-AGENT $/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Find auth/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /Snuffelt rond/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Cracking Enigma/ })).toBeDefined()
     await ui.unmount()
   }
 
@@ -67,7 +67,7 @@ test('an agent and its sub-agent show live, then move to Done', async ($, on) =>
   await $.turn.complete({ answer: 'all done', durationMs: 9, isAborted: false, turnId: 'x2', agentId: 'a1', reason: 'answer' })
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await ui.find({ type: 'Text', text: /Niemand aan het werk|werkt zelf/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /All quiet|busy itself/ })).toBeDefined()
   await ui.press({ key: 'tab-done' })
   expect(await ui.find({ type: 'Text', text: /all done/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Find auth/ })).toBeDefined()
@@ -149,7 +149,7 @@ test("a child session's agents and skills show under its row", async ($, on) => 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ type: 'Text', text: /Refine login/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Scan the login flow/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Snuffelt rond/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Cracking Enigma/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /tdd-workflow/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /dataviz/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^ SUB-AGENT $/ })).toBeDefined()

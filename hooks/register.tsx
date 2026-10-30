@@ -77,16 +77,16 @@ const AVATARS: [RegExp, string][] = [
 
 // What an agent is "doing", by the tool it last reached for.
 const VERBS: [RegExp, string][] = [
-  [/^(Grep|Glob)$/, 'Snuffelt rond'],
-  [/^Read$/, 'Leest mee'],
-  [/^(Edit|Write|NotebookEdit)$/, 'Zit te tikken'],
-  [/^(Bash|PowerShell)$/, "Ramt commando's"],
-  [/^Web/, 'Surft het web'],
-  [/^Agent$/, 'Schakelt hulp in'],
-  [/^Skill$/, 'Pakt gereedschap'],
-  [/^SendMessage$/, 'Kletst even'],
-  [/plan|Todo/i, 'Maakt lijstjes'],
-  [/^mcp__/, 'Belt een externe dienst'],
+  [/^(Grep|Glob)$/, 'Cracking Enigma'],
+  [/^Read$/, 'Reading the dispatches'],
+  [/^(Edit|Write|NotebookEdit)$/, 'Typing away at Bletchley Park'],
+  [/^(Bash|PowerShell)$/, 'Storming the beaches'],
+  [/^Web/, 'Tuning in to Radio London'],
+  [/^Agent$/, 'Calling in the Yanks'],
+  [/^Skill$/, 'Consulting the War Cabinet'],
+  [/^SendMessage$/, 'Wiring a telegram'],
+  [/plan|Todo/i, 'Drawing up Operation Overlord'],
+  [/^mcp__/, 'Ringing Washington'],
 ]
 
 // The argument that best says what a tool call was about.
@@ -104,10 +104,10 @@ const duration = (ms: number): string => {
 
 const ago = (ms: number): string => {
   const min = Math.floor(Math.max(0, ms) / 60_000)
-  if (min < 1) return 'zojuist'
-  if (min < 60) return `${min} min geleden`
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min} min ago`
   const hours = Math.floor(min / 60)
-  return hours < 24 ? `${hours} u geleden` : `${Math.floor(hours / 24)} d geleden`
+  return hours < 24 ? `${hours} h ago` : `${Math.floor(hours / 24)} d ago`
 }
 
 const hash = (text: string): number => [...text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7)
@@ -115,7 +115,7 @@ const hash = (text: string): number => [...text].reduce((h, c) => (h * 31 + c.ch
 const avatarOf = (type: string): string => AVATARS.find(([re]) => re.test(type))?.[1] ?? '🤖'
 const colorOf = (type: string): string => PALETTE[hash(type) % PALETTE.length] ?? 'cyan'
 const verbOf = (tool?: string): string =>
-  tool ? VERBS.find(([re]) => re.test(tool))?.[1] ?? 'Denkt na' : 'Warmt op'
+  tool ? VERBS.find(([re]) => re.test(tool))?.[1] ?? 'Keeping calm and carrying on' : 'Mustering at Dover'
 
 const detailOf = (input: Record<string, unknown>): string | undefined => {
   const key = DETAIL_KEYS.find(k => typeof input[k] === 'string' && input[k] !== '')
@@ -136,9 +136,9 @@ const mainRow = (): AgentRow => ({
   id: MAIN,
   parentId: '',
   seq: 0,
-  label: 'Hoofdsessie',
+  label: 'War Room',
   type: 'main session',
-  task: 'Hoofdsessie',
+  task: 'War Room',
   status: 'running',
   startedAt: Date.now(),
   skills: [],
@@ -159,10 +159,10 @@ const withSkill = (r: AgentRow, skill: string): AgentRow =>
   r.skills.includes(skill) ? r : { ...r, skills: [...r.skills, skill] }
 
 const ENDED: Record<Exclude<AgentStatus, 'running'>, { icon: string; label: string; color: string }> = {
-  done: { icon: '✓', label: 'klaar', color: 'green' },
-  aborted: { icon: '✋', label: 'afgebroken', color: 'yellow' },
-  error: { icon: '💥', label: 'mislukt', color: 'red' },
-  denied: { icon: '⛔', label: 'geweigerd', color: 'red' },
+  done: { icon: '✓', label: 'mission accomplished', color: 'green' },
+  aborted: { icon: '✋', label: 'evacuated at Dunkirk', color: 'yellow' },
+  error: { icon: '💥', label: 'sunk in the Channel', color: 'red' },
+  denied: { icon: '⛔', label: 'vetoed by Churchill', color: 'red' },
 }
 
 type Node = { row: AgentRow; depth: number; branch: string; stem: string }
@@ -443,7 +443,7 @@ export const register: Register = on => {
       }
       if (row) {
         const who = `${avatarOf(row.type)} ${row.name ?? row.type}`
-        void $.ui.toast(status === 'done' ? `🎉 ${who} is klaar` : `${ENDED[status].icon} ${who}: ${ENDED[status].label}`)
+        void $.ui.toast(status === 'done' ? `🎉 ${who} is home: V-Day!` : `${ENDED[status].icon} ${who}: ${ENDED[status].label}`)
       }
     }
     return next(e)
@@ -491,12 +491,12 @@ export const register: Register = on => {
 
     const rowOf = (id: string) => rows.find(x => x.id === id || x.name === id)
     const nameOf = (id: string): string => {
-      if (id === MAIN) return 'Hoofdsessie'
+      if (id === MAIN) return 'War Room'
       const r = rowOf(id)
       return r ? r.name ?? r.type : clip(id, 16)
     }
     const badgeOf = (id: string): string => {
-      if (id === MAIN) return '◆ Hoofdsessie'
+      if (id === MAIN) return '◆ War Room'
       const r = rowOf(id)
       return r ? `${avatarOf(r.type)} ${r.name ?? r.type}` : clip(id, 16)
     }
@@ -562,7 +562,7 @@ export const register: Register = on => {
             indented(
               lead,
               <Text color="yellow">
-                {spin} {verbOf(snap.mainTool)}…{snap.mainTool ? ` · nu: ${snap.mainTool}` : ''}
+                {spin} {verbOf(snap.mainTool)}…{snap.mainTool ? ` · now: ${snap.mainTool}` : ''}
               </Text>,
               'truncate-end',
             )}
@@ -591,7 +591,7 @@ export const register: Register = on => {
                           {spin} {verbOf(row.tool)}…
                         </Text>
                       ) : row.status === 'running' ? (
-                        <Text dimColor>? onbekend</Text>
+                        <Text dimColor>? missing in action</Text>
                       ) : (
                         <Text color={ENDED[row.status].color}>
                           {ENDED[row.status].icon} {ENDED[row.status].label}
@@ -617,16 +617,16 @@ export const register: Register = on => {
       <Box flexDirection="column">
         <Text wrap="truncate-end">
           <Text bold color="cyan">
-            ◆ Hoofdsessie{' '}
+            ◆ War Room{' '}
           </Text>
           {isMainBusy ? (
             <Text color="cyan">
-              {spin} {mainNow?.tool ? verbOf(mainNow.tool) : 'Denkt na'}…
+              {spin} {mainNow?.tool ? verbOf(mainNow.tool) : 'Keeping calm and carrying on'}…
             </Text>
           ) : running > 0 ? (
-            <Text color="cyan">{spin} Wacht op agents…</Text>
+            <Text color="cyan">{spin} Awaiting news from the front…</Text>
           ) : (
-            <Text dimColor>☕ Wacht op werk</Text>
+            <Text dimColor>☕ Tea time in the War Room</Text>
           )}
         </Text>
         {isMainBusy && mainNow && (
@@ -634,12 +634,12 @@ export const register: Register = on => {
             <Text color="cyan">{sparkline(mainNow.toolTimes ?? [], now)}</Text>
             <Text dimColor>
               {'  '}
-              {mainNow.toolCount} tools{mainNow.tool ? ` · nu: ${mainNow.tool}` : ''}
+              {mainNow.toolCount} tools{mainNow.tool ? ` · now: ${mainNow.tool}` : ''}
             </Text>
           </Text>
         )}
         <Text dimColor wrap="wrap">
-          {topLevel} agents · {subLevel} sub-agents · {childSessions.length} sessies · {running + runningSessions} bezig ·{' '}
+          {topLevel} agents · {subLevel} sub-agents · {childSessions.length} sessions · {running + runningSessions} busy ·{' '}
           {duration(now - opStart)}
         </Text>
       </Box>
@@ -668,17 +668,17 @@ export const register: Register = on => {
             icon: h.kind === 'report' ? '📦' : '💬',
             what:
               h.kind === 'report'
-                ? `rapport → ${nameOf(h.to)}`
+                ? `dispatch → ${nameOf(h.to)}`
                 : h.from === focused.id
-                  ? `bericht → ${nameOf(h.to)}`
-                  : `bericht ← ${nameOf(h.from)}`,
+                  ? `telegram → ${nameOf(h.to)}`
+                  : `telegram ← ${nameOf(h.from)}`,
             detail: h.text,
             color: 'white',
           })),
         ...kids.map(k => ({
           at: k.startedAt,
           icon: '🌱',
-          what: `start ${avatarOf(k.type)} ${k.name ?? k.type}`,
+          what: `deploys ${avatarOf(k.type)} ${k.name ?? k.type}`,
           detail: k.task,
           color: colorOf(k.type),
         })),
@@ -690,7 +690,7 @@ export const register: Register = on => {
           {header}
           <Box gap={2} marginTop={1} flexWrap="wrap">
             <Button key="back" hotkey="b" onPress={select('')}>
-              ← Terug
+              ← Back to HQ
             </Button>
             {focused.id !== MAIN && (
               <Button key="transcript" hotkey="t" onPress={() => void $.ui.view({ agentId: focused.id })}>
@@ -703,7 +703,7 @@ export const register: Register = on => {
               <Text>
                 {focused.id === MAIN ? '◆' : avatarOf(focused.type)}{' '}
                 <Text bold color={accent}>
-                  {focused.id === MAIN ? 'Hoofdsessie' : focused.name ?? focused.type}
+                  {focused.id === MAIN ? 'War Room' : focused.name ?? focused.type}
                 </Text>
                 <Text dimColor> {focused.type} </Text>
                 {statusText(focused)}
@@ -712,15 +712,15 @@ export const register: Register = on => {
             )}
           </Box>
           {indented(
-            'Gestart door ',
+            'Sent by      ',
             <Text>
-              {focused.id === MAIN ? 'jou' : badgeOf(focused.parentId)}
-              <Text dimColor> om {stamp(focused.startedAt)}</Text>
+              {focused.id === MAIN ? 'you' : badgeOf(focused.parentId)}
+              <Text dimColor> at {stamp(focused.startedAt)}</Text>
             </Text>,
           )}
-          {indented('Opdracht     ', brief?.text ?? focused.task)}
+          {indented('Orders       ', brief?.text ?? focused.task)}
           {indented(
-            'Activiteit   ',
+            'Activity     ',
             <Text>
               <Text color={accent}>{sparkline(focused.toolTimes ?? [], now)}</Text>
               <Text dimColor> {focused.toolCount} tools</Text>
@@ -729,10 +729,10 @@ export const register: Register = on => {
           {focused.skills.length > 0 &&
             indented('Skills       ', <Text color="magenta">🎒 {focused.skills.join(' · ')}</Text>)}
           <Box marginTop={1}>
-            <Text bold>⏱ Tijdlijn</Text>
+            <Text bold>⏱ War diary</Text>
           </Box>
-          {timeline.length === 0 && <Text dimColor>Nog niets gebeurd.</Text>}
-          {timeline.length > timelineRoom && <Text dimColor>⋮ {timeline.length - timelineRoom} eerdere stappen</Text>}
+          {timeline.length === 0 && <Text dimColor>No dispatches yet.</Text>}
+          {timeline.length > timelineRoom && <Text dimColor>⋮ {timeline.length - timelineRoom} earlier entries</Text>}
           {timeline.slice(-timelineRoom).map(item =>
             indented(
               `${stamp(item.at)} `,
@@ -794,9 +794,9 @@ export const register: Register = on => {
 
         {view === 'done' && (
           <Box flexDirection="column">
-            {finished.length === 0 && <Text dimColor>Nog geen afgeronde agents.</Text>}
+            {finished.length === 0 && <Text dimColor>Nobody has come home yet.</Text>}
             {finished.length > historyRoom && (
-              <Text dimColor>⋮ {finished.length - historyRoom} oudere agents niet getoond</Text>
+              <Text dimColor>⋮ {finished.length - historyRoom} older agents not shown</Text>
             )}
             {finished.slice(0, historyRoom).map(row => {
               const ended = ENDED[row.status as Exclude<AgentStatus, 'running'>]
@@ -822,7 +822,7 @@ export const register: Register = on => {
                       </Text>
                     </Box>
                   </Box>
-                  {isSub && indented('   ', <Text color="magenta">↳ gestart door {badgeOf(row.parentId)}</Text>)}
+                  {isSub && indented('   ', <Text color="magenta">↳ sent by {badgeOf(row.parentId)}</Text>)}
                   {indented('   ', row.task)}
                   {report && indented('   ', <Text dimColor>📦↑ "{report.text}"</Text>, 'truncate-end')}
                 </Box>
@@ -838,15 +838,15 @@ export const register: Register = on => {
               '└─ ',
               <Text dimColor>
                 {isMainBusy
-                  ? '🌱 De hoofdsessie werkt zelf; er zijn nu geen agents of sessies bezig.'
-                  : '🌱 Niemand aan het werk. Afgeronde agents staan onder ✓ Done.'}
+                  ? '🌱 The War Room is busy itself; no agents or sessions in the field.'
+                  : '🌱 All quiet on every front. Finished agents are under ✓ Done.'}
               </Text>,
             )}
           </Box>
         )}
         {view === 'live' && (
           <Box flexDirection="column">
-            {nodes.length > room && <Text dimColor>│  ⋮ {nodes.length - room} eerdere agents ingeklapt</Text>}
+            {nodes.length > room && <Text dimColor>│  ⋮ {nodes.length - room} earlier agents folded</Text>}
 
             {visible.map(({ row, depth, branch, stem }) => {
               const isRunning = row.status === 'running'
@@ -878,7 +878,7 @@ export const register: Register = on => {
                       <Text dimColor>{duration((row.endedAt ?? now) - row.startedAt)}</Text>
                     </Box>
                   </Box>
-                  {isSub && indented(lead, <Text color="magenta">↳ gestart door {badgeOf(row.parentId)}</Text>)}
+                  {isSub && indented(lead, <Text color="magenta">↳ sent by {badgeOf(row.parentId)}</Text>)}
                   {indented(lead, row.task)}
                   {indented(
                     lead,
@@ -888,7 +888,7 @@ export const register: Register = on => {
                       </Text>
                       <Text dimColor>
                         {'  '}
-                        {row.toolCount} tools{isRunning && row.tool ? ` · nu: ${row.tool}` : ''}
+                        {row.toolCount} tools{isRunning && row.tool ? ` · now: ${row.tool}` : ''}
                       </Text>
                     </Text>,
                   )}
@@ -910,7 +910,7 @@ export const register: Register = on => {
 
         {shownSessions.length > 0 && (
           <Box flexDirection="column" marginTop={1}>
-            <Text bold>🪟 Sessies {view === 'live' ? 'aan het werk' : 'afgerond'}</Text>
+            <Text bold>🪟 Sessions {view === 'live' ? 'in the field' : 'back home'}</Text>
             {shownSessions.map(s => {
               const depth = sessionDepth(s)
               const lead = '   '.repeat(depth)
@@ -921,7 +921,7 @@ export const register: Register = on => {
                     <Box flexShrink={0}>
                       <Text dimColor>{lead}{depth > 0 ? '└─ ' : ''}</Text>
                       <Text backgroundColor="yellow" color="black" bold>
-                        {' SESSIE '}
+                        {' SESSION '}
                       </Text>
                       <Text> </Text>
                     </Box>
@@ -929,9 +929,9 @@ export const register: Register = on => {
                       <Text wrap="truncate-end">
                         🪟 <Text bold>{s.title}</Text>{' '}
                         {s.isRunning ? (
-                          <Text color="yellow">{spin} Werkt…</Text>
+                          <Text color="yellow">{spin} On manoeuvres…</Text>
                         ) : (
-                          <Text color="green">✓ klaar</Text>
+                          <Text color="green">✓ demobbed</Text>
                         )}
                       </Text>
                     </Box>
@@ -942,7 +942,7 @@ export const register: Register = on => {
                   {indented(
                     `${lead}   `,
                     <Text dimColor>
-                      ↳ gestart door {s.startedBy && familyIds.has(s.startedBy) ? family.find(x => x.id === s.startedBy)?.title : 'deze sessie'}
+                      ↳ sent by {s.startedBy && familyIds.has(s.startedBy) ? family.find(x => x.id === s.startedBy)?.title : 'the War Room'}
                       {pr ? ` · ${pr}` : ''}
                     </Text>,
                     'truncate-end',
@@ -956,14 +956,14 @@ export const register: Register = on => {
 
         {showSkills && (
           <Box flexDirection="column" marginTop={1}>
-            <Text bold>{view === 'live' ? '🎒 Skills in gebruik' : '🎒 Skills · wie, wat, wanneer'}</Text>
-            {skillLog.length === 0 && <Text dimColor>Nog geen skills gebruikt.</Text>}
+            <Text bold>{view === 'live' ? '🎒 Kit in use' : '🎒 Kit issued · who, what, when'}</Text>
+            {skillLog.length === 0 && <Text dimColor>No kit issued yet.</Text>}
             {skillLog.slice(-skillRoom).map(ev =>
               indented(
                 `${stamp(ev.at)} `,
                 <Text>
                   <Text color="magenta">{ev.name}</Text>
-                  <Text dimColor> door </Text>
+                  <Text dimColor> to </Text>
                   {badgeOf(ev.agentId)}
                 </Text>,
               ),
@@ -973,7 +973,7 @@ export const register: Register = on => {
 
         <Box marginTop={1}>
           <Text dimColor wrap="wrap">
-            AGENT = gestart door de hoofdsessie · SUB-AGENT = gestart door een andere agent · klik een naam voor details
+            AGENT = sent by the War Room · SUB-AGENT = sent by another agent · 🎒 = skills · click a name for details
           </Text>
         </Box>
       </Box>
