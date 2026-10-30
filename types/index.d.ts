@@ -4,7 +4,7 @@ export type AgentRow = {
   id: string
   parentId: string
   seq: number
-  callsign: string
+  label: string
   type: string
   name?: string
   task: string
@@ -27,6 +27,30 @@ export type Handover = {
 
 export type ViewFilter = 'live' | 'done'
 
+export type SessionRow = {
+  id: string
+  title: string
+  name?: string
+  startedBy?: string
+  isRunning: boolean
+  prNumber?: number
+  prState?: string
+  firstSeenAt: number
+  lastActivityAt: number
+  endedAt?: number
+}
+
+// What one session shares with the session that started it: written by the
+// child to a shared folder, read by the parent to draw under its session row.
+export type SessionSnapshot = {
+  id: string
+  updatedAt: number
+  isMainBusy: boolean
+  mainTool?: string
+  agents: AgentRow[]
+  skills: { at: number; agentId: string; name: string }[]
+}
+
 export type ActivityEvent = {
   at: number
   agentId: string
@@ -41,8 +65,11 @@ declare module 'claude-code' {
       agents: Shaped<AgentRow[]>
       handovers: Shaped<Handover[]>
       events: Shaped<ActivityEvent[]>
+      sessions: Shaped<SessionRow[]>
+      remote: Shaped<Record<string, SessionSnapshot>>
       selected: Shaped<string>
       filter: Shaped<ViewFilter>
+      mainBusy: Shaped<boolean>
       tick: Shaped<number>
     }
   }

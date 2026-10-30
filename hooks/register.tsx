@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
-import type { ActivityEvent, AgentRow, AgentStatus, Handover, ViewFilter } from '../types'
+import type { ActivityEvent, AgentRow, AgentStatus, Handover, SessionRow, SessionSnapshot, ViewFilter } from '../types'
+import { readSnapshots, resolveSelfId, writeSnapshot } from './share'
 
 const PANE = 'agent-monitor'
 const MAIN = 'main'
@@ -12,6 +13,15 @@ const MAX_TOOL_TIMES = 60
 const LINES_PER_AGENT = 6
 const SKILL_ROWS = 6
 const TICK_MS = 500
+const SESSION_POLL_MS = 5_000
+const LIST_EVERY_POLLS = 4
+const SHARE_MS = 3_000
+const SHARED_AGENTS = 30
+const SHARED_SKILLS = 20
+const REMOTE_ROWS = 6
+const LIST_SESSIONS_TOOL = 'mcp__ccd_session_mgmt__list_sessions'
+const GET_SESSION_TOOL = 'mcp__ccd_session_mgmt__get_session'
+const SESSION_START_TOOLS = ['mcp__ccd_session__start_session', 'mcp__ccd_session__hand_off_to_session']
 const PARTY_MS = 15_000
 const SKILL_DEDUPE_MS = 3_000
 const SPARK_BUCKETS = 12
@@ -20,7 +30,7 @@ const SPARK_BUCKET_MS = 2_500
 // Change a shape tag when a row's fields change: it declines what an earlier
 // version stored, which outlives a reload.
 const agents = atom({ plugin: 'agent-monitor', key: 'agents' } as const, [], {
-  shape: 'agents-3',
+  shape: 'agents-4',
 })
 const handovers = atom({ plugin: 'agent-monitor', key: 'handovers' } as const, [], {
   shape: 'handovers-1',
@@ -33,6 +43,15 @@ const selected = atom({ plugin: 'agent-monitor', key: 'selected' } as const, '',
 })
 const filter = atom({ plugin: 'agent-monitor', key: 'filter' } as const, 'live' as ViewFilter, {
   shape: 'filter-1',
+})
+const sessions = atom({ plugin: 'agent-monitor', key: 'sessions' } as const, [], {
+  shape: 'sessions-1',
+})
+const mainBusy = atom({ plugin: 'agent-monitor', key: 'mainBusy' } as const, false, {
+  shape: 'mainBusy-1',
+})
+const remote = atom({ plugin: 'agent-monitor', key: 'remote' } as const, {} as Record<string, SessionSnapshot>, {
+  shape: 'remote-1',
 })
 const tick = atom({ plugin: 'agent-monitor', key: 'tick' } as const, 0, {
   shape: 'tick-1',
@@ -63,7 +82,7 @@ const VERBS: [RegExp, string][] = [
   [/^(Edit|Write|NotebookEdit)$/, 'Zit te tikken'],
   [/^(Bash|PowerShell)$/, "Ramt commando's"],
   [/^Web/, 'Surft het web'],
-  [/^Agent$/, 'Roept versterking in'],
+  [/^Agent$/, 'Schakelt hulp in'],
   [/^Skill$/, 'Pakt gereedschap'],
   [/^SendMessage$/, 'Kletst even'],
   [/plan|Todo/i, 'Maakt lijstjes'],
@@ -81,6 +100,14 @@ const clip = (text: string, max: number): string => {
 const duration = (ms: number): string => {
   const s = Math.max(0, Math.floor(ms / 1000))
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}
+
+const ago = (ms: number): string => {
+  const min = Math.floor(Math.max(0, ms) / 60_000)
+  if (min < 1) return 'zojuist'
+  if (min < 60) return `${min} min geleden`
+  const hours = Math.floor(min / 60)
+  return hours < 24 ? `${hours} u geleden` : `${Math.floor(hours / 24)} d geleden`
 }
 
 const hash = (text: string): number => [...text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7)
@@ -109,7 +136,7 @@ const mainRow = (): AgentRow => ({
   id: MAIN,
   parentId: '',
   seq: 0,
-  callsign: 'COMMAND',
+  label: 'Hoofdsessie',
   type: 'main session',
   task: 'Hoofdsessie',
   status: 'running',
@@ -140,7 +167,7 @@ const ENDED: Record<Exclude<AgentStatus, 'running'>, { icon: string; label: stri
 
 type Node = { row: AgentRow; depth: number; branch: string; stem: string }
 
-// Depth-first walk from COMMAND, with tree connectors for each agent.
+// Depth-first walk from the main session, with tree connectors for each agent.
 const flattenTree = (rows: AgentRow[]): Node[] => {
   const nodes: Node[] = []
   const seen = new Set<string>([MAIN])
@@ -154,11 +181,110 @@ const flattenTree = (rows: AgentRow[]): Node[] => {
     })
   }
   walk(MAIN, '', 0)
-  // Agents whose parent is unknown hang directly under COMMAND.
+  // Agents whose parent is unknown hang directly under the main session.
   for (const row of rows.filter(r => !seen.has(r.id))) {
     nodes.push({ row, depth: 0, branch: '└─ ', stem: '   ' })
   }
   return nodes
+}
+
+// Whether polling the session list is worth it: true once it found a linked
+// session or this session started one. Starts over with each reload.
+let isSessionFamilyKnown = false
+let isSyncing = false
+let hasPolled = false
+let pollCount = 0
+// This session's app id, once known, and the last snapshot it shared.
+let selfId: string | undefined
+let lastShared = ''
+
+const toSessionRows = (text: string): Omit<SessionRow, 'firstSeenAt' | 'endedAt'>[] => {
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((item: Record<string, unknown>) => {
+      if (typeof item.sessionId !== 'string' || item.isArchived === true) return []
+      return [
+        {
+          id: item.sessionId,
+          title: typeof item.title === 'string' ? item.title : item.sessionId,
+          name: typeof item.name === 'string' ? item.name : undefined,
+          startedBy: typeof item.startedBy === 'string' ? item.startedBy : undefined,
+          isRunning: item.isRunning === true,
+          prNumber: typeof item.prNumber === 'number' ? item.prNumber : undefined,
+          prState: typeof item.prState === 'string' ? item.prState : undefined,
+          lastActivityAt: typeof item.lastActivityAt === 'string' ? Date.parse(item.lastActivityAt) || 0 : 0,
+        },
+      ]
+    })
+  } catch {
+    return []
+  }
+}
+
+// Reads this session's linked family from the app, only where the permission
+// check allows it without asking, so polling never opens a dialog.
+const syncSessions = async ($: EngineInterface): Promise<void> => {
+  // After the first look, keep polling only for a session that has a family.
+  if (isSyncing || (hasPolled && !isSessionFamilyKnown)) return
+  isSyncing = true
+  hasPolled = true
+  try {
+    const isListDue = pollCount % LIST_EVERY_POLLS === 0
+    pollCount += 1
+    if (isListDue) {
+      const input = { linked: true }
+      const { decision } = await $.tool.check({ tool: LIST_SESSIONS_TOOL, input })
+      if (decision !== 'allow') return
+      const res = await $.tool.call({ tool: LIST_SESSIONS_TOOL, ...input })
+      const text = 'text' in res && typeof res.text === 'string' ? res.text : ''
+      const fresh = toSessionRows(text)
+      if (fresh.length > 0) isSessionFamilyKnown = true
+      const now = Date.now()
+      await update($, sessions, list =>
+        fresh.map(s => {
+          const before = list.find(x => x.id === s.id)
+          const firstSeenAt = before?.firstSeenAt ?? now
+          const endedAt = s.isRunning ? undefined : before?.endedAt ?? (before?.isRunning ? now : s.lastActivityAt || now)
+          return { ...s, firstSeenAt, endedAt }
+        }),
+      )
+    }
+    const children = (await read($, sessions)).filter(s => s.startedBy !== undefined).map(s => s.id)
+    if (children.length > 0) {
+      const found = await readSnapshots($, children)
+      await update($, remote, () => found)
+    }
+  } catch {
+    // The tool is missing or refused here: no sessions to show.
+  } finally {
+    isSyncing = false
+  }
+}
+
+// Shares what this session does with the session that started it, when it
+// changed; nothing is written before this session knows its own app id.
+const shareSnapshot = async ($: EngineInterface): Promise<void> => {
+  if (!selfId) return
+  const rows = await read($, agents)
+  const log = await read($, events)
+  const main = rows.find(r => r.id === MAIN)
+  const body = {
+    isMainBusy: await read($, mainBusy),
+    mainTool: main?.tool,
+    agents: rows
+      .filter(r => r.id !== MAIN)
+      .slice(-SHARED_AGENTS)
+      .map(r => ({ ...r, toolTimes: [] })),
+    skills: log
+      .filter(ev => ev.kind === 'skill')
+      .slice(-SHARED_SKILLS)
+      .map(ev => ({ at: ev.at, agentId: ev.agentId, name: ev.name })),
+  }
+  const text = JSON.stringify(body)
+  if (text === lastShared) return
+  lastShared = text
+  await writeSnapshot($, { id: selfId, updatedAt: Date.now(), ...body })
 }
 
 export const register: Register = on => {
@@ -172,11 +298,26 @@ export const register: Register = on => {
     $.clock.every(TICK_MS, async () => {
       const rows = await read($, agents)
       const now = Date.now()
-      const isLively = rows.some(
-        r => r.id !== MAIN && (r.status === 'running' || (r.endedAt !== undefined && now - r.endedAt < PARTY_MS)),
+      const isRemoteBusy = Object.values(await read($, remote)).some(
+        snap => snap.isMainBusy || snap.agents.some(a => a.status === 'running'),
       )
+      const isLively =
+        isRemoteBusy ||
+        (await read($, mainBusy)) ||
+        rows.some(
+          r => r.id !== MAIN && (r.status === 'running' || (r.endedAt !== undefined && now - r.endedAt < PARTY_MS)),
+        )
       if (isLively) await update($, tick, n => n + 1)
     })
+    // Sessions started from this one live in their own windows; the app's
+    // linked-session list is the only place that knows them, so poll it.
+    void syncSessions($)
+    $.clock.every(SESSION_POLL_MS, () => void syncSessions($))
+    // Let the session that started this one see inside it.
+    void resolveSelfId($).then(id => {
+      selfId = id
+    })
+    $.clock.every(SHARE_MS, () => void shareSnapshot($))
     void $.ui.open({ id: PANE, title: 'Agents' })
     return next(e)
   })
@@ -198,7 +339,7 @@ export const register: Register = on => {
         id,
         parentId,
         seq,
-        callsign: `#${seq}`,
+        label: `#${seq}`,
         type: e.subagentType,
         name: e.name,
         task: e.description || clip(e.prompt, 80),
@@ -220,6 +361,14 @@ export const register: Register = on => {
 
   // Tool and skill activity, attributed to the loop that ran it.
   on('tool.call', async ($, e, next) => {
+    // Our own polling of the session list is not the agent's work.
+    if (e.tool === LIST_SESSIONS_TOOL || e.tool === GET_SESSION_TOOL) return next(e)
+    if (SESSION_START_TOOLS.includes(e.tool)) {
+      isSessionFamilyKnown = true
+      const res = await next(e)
+      void syncSessions($)
+      return res
+    }
     const who = e.agentId ?? MAIN
     const now = Date.now()
     const input = e as unknown as Record<string, unknown>
@@ -264,8 +413,18 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // The main session's own turn: busy from its start to its end.
+  on('turn.start', async ($, e, next) => {
+    if (!e.agentId) await update($, mainBusy, () => true)
+    return next(e)
+  })
+
   // An agent finishes and hands its report back.
   on('turn.complete', async ($, e, next) => {
+    if (!e.agentId) {
+      await update($, mainBusy, () => false)
+      await update($, agents, list => patch(list, MAIN, r => ({ ...r, tool: undefined })))
+    }
     if (e.agentId) {
       const id = e.agentId
       const status: AgentStatus =
@@ -298,26 +457,55 @@ export const register: Register = on => {
     const focusId = await read($, selected)
     const beat = await read($, tick)
     const view = await read($, filter)
+    const family = await read($, sessions)
+    const inside = await read($, remote)
     const now = Date.now()
-    const cols = e.viewport?.columns ?? 60
     const lines = e.viewport?.rows ?? 30
-    const width = Math.max(34, Math.min(100, cols - 2))
     const spin = SPINNER[beat % SPINNER.length]
     const opStart = rows.find(r => r.id === MAIN)?.startedAt ?? now
     const stamp = (at: number): string => `T+${duration(at - opStart)}`
 
+    // A fixed lead (tree lines, a label) and a body that reflows beside it:
+    // the body wraps or truncates within the pane's width, never under the lead.
+    const indented = (lead: string, body: JSX.Children, mode: 'wrap' | 'truncate-end' = 'wrap') => (
+      <Box>
+        <Box flexShrink={0}>
+          <Text dimColor>{lead}</Text>
+        </Box>
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <Text wrap={mode}>{body}</Text>
+        </Box>
+      </Box>
+    )
+    // A title row: the left part gives way (truncates) before the right part does.
+    const titleRow = (left: JSX.Children, right: JSX.Children) => (
+      <Box>
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <Text wrap="truncate-end">{left}</Text>
+        </Box>
+        <Box flexShrink={0} marginLeft={1}>
+          <Text dimColor>{right}</Text>
+        </Box>
+      </Box>
+    )
+
     const rowOf = (id: string) => rows.find(x => x.id === id || x.name === id)
     const nameOf = (id: string): string => {
-      if (id === MAIN) return 'COMMAND'
+      if (id === MAIN) return 'Hoofdsessie'
       const r = rowOf(id)
       return r ? r.name ?? r.type : clip(id, 16)
     }
     const badgeOf = (id: string): string => {
-      if (id === MAIN) return '◆ COMMAND'
+      if (id === MAIN) return '◆ Hoofdsessie'
       const r = rowOf(id)
       return r ? `${avatarOf(r.type)} ${r.name ?? r.type}` : clip(id, 16)
     }
     const select = (id: string) => () => void update($, selected, () => id)
+    const levelBadge = (isSub: boolean) => (
+      <Text backgroundColor={isSub ? 'magenta' : 'cyan'} color="black" bold>
+        {isSub ? ' SUB-AGENT ' : ' AGENT '}
+      </Text>
+    )
 
     const statusText = (row: AgentRow) => {
       if (row.status === 'running') {
@@ -341,17 +529,118 @@ export const register: Register = on => {
     const running = units.filter(r => r.status === 'running').length
     const topLevel = units.filter(r => r.parentId === MAIN || !rows.some(p => p.id === r.parentId)).length
     const subLevel = units.length - topLevel
+    // Sessions this one started, and theirs; one with no starter is our own parent.
+    const familyIds = new Set(family.map(s => s.id))
+    const childSessions = family.filter(s => s.startedBy !== undefined)
+    const runningSessions = childSessions.filter(s => s.isRunning).length
+    const sessionDepth = (s: SessionRow): number => {
+      let depth = 0
+      let cur: SessionRow | undefined = s
+      const seen = new Set<string>()
+      while (cur?.startedBy && familyIds.has(cur.startedBy) && !seen.has(cur.id)) {
+        seen.add(cur.id)
+        const starter: string = cur.startedBy
+        cur = family.find(x => x.id === starter)
+        depth += 1
+      }
+      return depth
+    }
 
+    const isMainBusy = await read($, mainBusy)
+
+    // What a child session is doing, from the snapshot it shares: its own
+    // activity, then its agents and sub-agents as a small tree.
+    const insideOf = (s: SessionRow, lead: string) => {
+      const snap = inside[s.id]
+      if (!snap) return null
+      const mainSkills = [...new Set(snap.skills.filter(k => k.agentId === MAIN).map(k => k.name))]
+      const inner = flattenTree([mainRow(), ...snap.agents]).slice(-REMOTE_ROWS)
+      return (
+        <Box flexDirection="column">
+          {s.isRunning &&
+            snap.isMainBusy &&
+            indented(
+              lead,
+              <Text color="yellow">
+                {spin} {verbOf(snap.mainTool)}…{snap.mainTool ? ` · nu: ${snap.mainTool}` : ''}
+              </Text>,
+              'truncate-end',
+            )}
+          {mainSkills.length > 0 && indented(lead, <Text color="magenta">🎒 {mainSkills.join(' · ')}</Text>, 'truncate-end')}
+          {inner.map(({ row, depth, branch, stem }) => {
+            const isLive = s.isRunning && row.status === 'running'
+            return (
+              <Box flexDirection="column">
+                <Box>
+                  <Box flexShrink={0}>
+                    <Text dimColor>
+                      {lead}
+                      {branch}
+                    </Text>
+                    {levelBadge(depth > 0)}
+                    <Text> </Text>
+                  </Box>
+                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                    <Text wrap="truncate-end">
+                      {avatarOf(row.type)}{' '}
+                      <Text color={colorOf(row.type)} bold dimColor={!isLive}>
+                        {row.name ?? row.type}
+                      </Text>{' '}
+                      {isLive ? (
+                        <Text color={colorOf(row.type)}>
+                          {spin} {verbOf(row.tool)}…
+                        </Text>
+                      ) : row.status === 'running' ? (
+                        <Text dimColor>? onbekend</Text>
+                      ) : (
+                        <Text color={ENDED[row.status].color}>
+                          {ENDED[row.status].icon} {ENDED[row.status].label}
+                        </Text>
+                      )}
+                    </Text>
+                  </Box>
+                  <Box flexShrink={0} marginLeft={1}>
+                    <Text dimColor>{duration((row.endedAt ?? (isLive ? now : snap.updatedAt)) - row.startedAt)}</Text>
+                  </Box>
+                </Box>
+                {indented(`${lead}${stem}   `, row.task, 'truncate-end')}
+                {row.skills.length > 0 &&
+                  indented(`${lead}${stem}   `, <Text color="magenta">🎒 {row.skills.join(' · ')}</Text>, 'truncate-end')}
+              </Box>
+            )
+          })}
+        </Box>
+      )
+    }
+    const mainNow = rows.find(r => r.id === MAIN)
     const header = (
-      <Box justifyContent="space-between">
-        <Text>
+      <Box flexDirection="column">
+        <Text wrap="truncate-end">
           <Text bold color="cyan">
-            ◆ COMMAND{' '}
+            ◆ Hoofdsessie{' '}
           </Text>
-          {running > 0 ? <Text color="cyan">{spin} Dirigeert…</Text> : <Text dimColor>☕ Wacht op orders</Text>}
+          {isMainBusy ? (
+            <Text color="cyan">
+              {spin} {mainNow?.tool ? verbOf(mainNow.tool) : 'Denkt na'}…
+            </Text>
+          ) : running > 0 ? (
+            <Text color="cyan">{spin} Wacht op agents…</Text>
+          ) : (
+            <Text dimColor>☕ Wacht op werk</Text>
+          )}
         </Text>
-        <Text dimColor>
-          {topLevel} agents · {subLevel} sub-agents · {running} bezig · {duration(now - opStart)}
+        {isMainBusy && mainNow && (
+          <Text wrap="truncate-end">
+            <Text color="cyan">{sparkline(mainNow.toolTimes ?? [], now)}</Text>
+            <Text dimColor>
+              {'  '}
+              {mainNow.toolCount} tools{mainNow.tool ? ` · nu: ${mainNow.tool}` : ''}
+            </Text>
+          </Text>
+        )}
+        <Text dimColor wrap="wrap">
+          {topLevel} agents · {subLevel} sub-agents · {childSessions.length} sessies · {running + runningSessions} bezig ·{' '}
+          {duration(now - opStart)}
         </Text>
       </Box>
     )
@@ -360,7 +649,7 @@ export const register: Register = on => {
     const focused = focusId ? rows.find(r => r.id === focusId) : undefined
     if (focused) {
       const accent = colorOf(focused.type)
-      const tasking = moves.find(h => h.kind === 'task' && h.to === focused.id)
+      const brief = moves.find(h => h.kind === 'task' && h.to === focused.id)
       const kids = rows.filter(r => r.parentId === focused.id)
       const timeline = [
         ...log
@@ -383,24 +672,23 @@ export const register: Register = on => {
                 : h.from === focused.id
                   ? `bericht → ${nameOf(h.to)}`
                   : `bericht ← ${nameOf(h.from)}`,
-            detail: clip(h.text, 80),
+            detail: h.text,
             color: 'white',
           })),
         ...kids.map(k => ({
           at: k.startedAt,
           icon: '🌱',
-          what: `zet ${avatarOf(k.type)} ${k.name ?? k.type} in`,
+          what: `start ${avatarOf(k.type)} ${k.name ?? k.type}`,
           detail: k.task,
           color: colorOf(k.type),
         })),
       ].sort((a, b) => a.at - b.at)
-      const timelineRoom = Math.max(4, lines - 16)
+      const timelineRoom = Math.max(4, lines - 18)
 
       return (
-        <Box flexDirection="column" width={width}>
+        <Box flexDirection="column" width="100%">
           {header}
-          <Text dimColor>│</Text>
-          <Box gap={2}>
+          <Box gap={2} marginTop={1} flexWrap="wrap">
             <Button key="back" hotkey="b" onPress={select('')}>
               ← Terug
             </Button>
@@ -410,50 +698,51 @@ export const register: Register = on => {
               </Button>
             )}
           </Box>
-          <Text> </Text>
-          <Box justifyContent="space-between">
-            <Text>
-              <Text>{focused.id === MAIN ? '◆' : avatarOf(focused.type)} </Text>
-              <Text bold color={accent}>
-                {focused.id === MAIN ? 'COMMAND' : focused.name ?? focused.type}
-              </Text>
-              <Text dimColor> {focused.type} </Text>
-              {statusText(focused)}
-            </Text>
-            <Text dimColor>{duration((focused.endedAt ?? now) - focused.startedAt)}</Text>
+          <Box marginTop={1}>
+            {titleRow(
+              <Text>
+                {focused.id === MAIN ? '◆' : avatarOf(focused.type)}{' '}
+                <Text bold color={accent}>
+                  {focused.id === MAIN ? 'Hoofdsessie' : focused.name ?? focused.type}
+                </Text>
+                <Text dimColor> {focused.type} </Text>
+                {statusText(focused)}
+              </Text>,
+              duration((focused.endedAt ?? now) - focused.startedAt),
+            )}
           </Box>
-          <Text>
-            <Text dimColor>Ingezet door </Text>
-            {focused.id === MAIN ? 'jou' : badgeOf(focused.parentId)}
-            <Text dimColor> om {stamp(focused.startedAt)}</Text>
-          </Text>
-          <Text>
-            <Text dimColor>Opdracht    </Text>
-            {clip(tasking?.text ?? focused.task, width * 3)}
-          </Text>
-          <Text>
-            <Text dimColor>Activiteit  </Text>
-            <Text color={accent}>{sparkline(focused.toolTimes ?? [], now)}</Text>
-            <Text dimColor> {focused.toolCount} tools</Text>
-          </Text>
-          {focused.skills.length > 0 && (
+          {indented(
+            'Gestart door ',
             <Text>
-              <Text dimColor>Skills      </Text>
-              <Text color="magenta">🎒 {focused.skills.join(' · ')}</Text>
-            </Text>
+              {focused.id === MAIN ? 'jou' : badgeOf(focused.parentId)}
+              <Text dimColor> om {stamp(focused.startedAt)}</Text>
+            </Text>,
           )}
-          <Text> </Text>
-          <Text bold>⏱ Tijdlijn</Text>
+          {indented('Opdracht     ', brief?.text ?? focused.task)}
+          {indented(
+            'Activiteit   ',
+            <Text>
+              <Text color={accent}>{sparkline(focused.toolTimes ?? [], now)}</Text>
+              <Text dimColor> {focused.toolCount} tools</Text>
+            </Text>,
+          )}
+          {focused.skills.length > 0 &&
+            indented('Skills       ', <Text color="magenta">🎒 {focused.skills.join(' · ')}</Text>)}
+          <Box marginTop={1}>
+            <Text bold>⏱ Tijdlijn</Text>
+          </Box>
           {timeline.length === 0 && <Text dimColor>Nog niets gebeurd.</Text>}
           {timeline.length > timelineRoom && <Text dimColor>⋮ {timeline.length - timelineRoom} eerdere stappen</Text>}
-          {timeline.slice(-timelineRoom).map(item => (
-            <Text>
-              <Text dimColor>{stamp(item.at)} </Text>
-              <Text>{item.icon} </Text>
-              <Text color={item.color}>{item.what}</Text>
-              {item.detail && <Text dimColor> {clip(item.detail, Math.max(12, width - 34))}</Text>}
-            </Text>
-          ))}
+          {timeline.slice(-timelineRoom).map(item =>
+            indented(
+              `${stamp(item.at)} `,
+              <Text>
+                {item.icon} <Text color={item.color}>{item.what}</Text>
+                {item.detail && <Text dimColor> {item.detail}</Text>}
+              </Text>,
+              'truncate-end',
+            ),
+          )}
         </Box>
       )
     }
@@ -470,6 +759,9 @@ export const register: Register = on => {
       }
     }
     const nodes = flattenTree(rows.filter(r => r.id === MAIN || liveIds.has(r.id)))
+    const shownSessions = childSessions
+      .filter(s => (view === 'live' ? s.isRunning : !s.isRunning))
+      .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
     const finished = units
       .filter(r => r.status !== 'running')
       .sort((a, b) => (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt))
@@ -478,14 +770,14 @@ export const register: Register = on => {
     const skillLog = log.filter(ev => ev.kind === 'skill' && (view === 'done' || liveIds.has(ev.agentId)))
     const showSkills = view === 'done' || skillLog.length > 0
     const skillRoom = !showSkills ? 0 : skillLog.length === 0 ? 1 : Math.min(SKILL_ROWS, skillLog.length)
-    const room = Math.max(1, Math.floor((lines - 9 - skillRoom) / LINES_PER_AGENT))
+    const room = Math.max(1, Math.floor((lines - 10 - skillRoom) / LINES_PER_AGENT))
     const visible = nodes.slice(-room)
     const lastReport = (id: string) => [...moves].reverse().find(h => h.kind === 'report' && h.from === id)
     const lastMessage = (id: string) => [...moves].reverse().find(h => h.kind === 'message' && h.from === id)
-    const historyRoom = Math.max(1, Math.floor((lines - 10 - skillRoom) / 4))
+    const historyRoom = Math.max(1, Math.floor((lines - 11 - skillRoom) / 4))
     const setView = (next: ViewFilter) => () => void update($, filter, () => next)
     const tabs = (
-      <Box gap={2} marginTop={1}>
+      <Box gap={2} marginTop={1} flexWrap="wrap">
         <Button key="tab-live" variant={view === 'live' ? 'primary' : 'secondary'} onPress={setView('live')}>
           ● Live ({running})
         </Button>
@@ -496,7 +788,7 @@ export const register: Register = on => {
     )
 
     return (
-      <Box flexDirection="column" width={width}>
+      <Box flexDirection="column" width="100%">
         {header}
         {tabs}
 
@@ -512,12 +804,10 @@ export const register: Register = on => {
               const isSub = isSubAgent(row)
               return (
                 <Box flexDirection="column" marginTop={1}>
-                  <Box justifyContent="space-between">
-                    <Box>
+                  <Box>
+                    <Box flexGrow={1} flexShrink={1} minWidth={0}>
                       <Text color={ended.color}>{ended.icon} </Text>
-                      <Text backgroundColor={isSub ? 'magenta' : 'cyan'} color="black" bold>
-                        {isSub ? ' SUB-AGENT ' : ' AGENT '}
-                      </Text>
+                      {levelBadge(isSub)}
                       <Text> </Text>
                       <Button key={`done-${row.id}`} plain onPress={select(row.id)}>
                         {avatarOf(row.type)}{' '}
@@ -526,124 +816,166 @@ export const register: Register = on => {
                         </Text>
                       </Button>
                     </Box>
-                    <Text dimColor>
-                      {stamp(row.endedAt ?? row.startedAt)} · {duration((row.endedAt ?? now) - row.startedAt)}
-                    </Text>
+                    <Box flexShrink={0} marginLeft={1}>
+                      <Text dimColor>
+                        {stamp(row.endedAt ?? row.startedAt)} · {duration((row.endedAt ?? now) - row.startedAt)}
+                      </Text>
+                    </Box>
                   </Box>
-                  {isSub && <Text color="magenta">   ↳ ingezet door {badgeOf(row.parentId)}</Text>}
-                  <Text>   {clip(row.task, width - 4)}</Text>
-                  {report && <Text dimColor>   📦↑ "{clip(report.text, width - 10)}"</Text>}
+                  {isSub && indented('   ', <Text color="magenta">↳ gestart door {badgeOf(row.parentId)}</Text>)}
+                  {indented('   ', row.task)}
+                  {report && indented('   ', <Text dimColor>📦↑ "{report.text}"</Text>, 'truncate-end')}
                 </Box>
               )
             })}
           </Box>
         )}
 
-        {view === 'live' && nodes.length === 0 && (
+        {view === 'live' && nodes.length === 0 && runningSessions === 0 && (
           <Box flexDirection="column">
             <Text dimColor>│</Text>
-            <Text dimColor>└─ 🌱 Niemand aan het werk. Afgeronde agents staan onder ✓ Done.</Text>
+            {indented(
+              '└─ ',
+              <Text dimColor>
+                {isMainBusy
+                  ? '🌱 De hoofdsessie werkt zelf; er zijn nu geen agents of sessies bezig.'
+                  : '🌱 Niemand aan het werk. Afgeronde agents staan onder ✓ Done.'}
+              </Text>,
+            )}
           </Box>
         )}
         {view === 'live' && (
-        <Box flexDirection="column">
-        {nodes.length > room && <Text dimColor>│  ⋮ {nodes.length - room} eerdere agents ingeklapt</Text>}
+          <Box flexDirection="column">
+            {nodes.length > room && <Text dimColor>│  ⋮ {nodes.length - room} eerdere agents ingeklapt</Text>}
 
-        {visible.map(({ row, depth, branch, stem }) => {
-          const isRunning = row.status === 'running'
-          const isParty = row.status === 'done' && row.endedAt !== undefined && now - row.endedAt < PARTY_MS
-          const report = lastReport(row.id)
-          const message = lastMessage(row.id)
-          const textRoom = Math.max(20, width - stem.length - 8)
-          const accent = colorOf(row.type)
-          const isSub = depth > 0
-          return (
-            <Box flexDirection="column">
-              <Text dimColor>{stem.replace(/ +$/, '') || '│'}</Text>
-              <Box justifyContent="space-between">
-                <Box>
-                  <Text dimColor>{branch}</Text>
-                  <Text backgroundColor={isSub ? 'magenta' : 'cyan'} color="black" bold>
-                    {isSub ? ' SUB-AGENT ' : ' AGENT '}
-                  </Text>
-                  <Text> </Text>
-                  <Button key={`agent-${row.id}`} plain onPress={select(row.id)}>
-                    {avatarOf(row.type)}{' '}
-                    <Text color={accent} bold dimColor={!isRunning && !isParty}>
-                      {row.name ?? row.type}
-                    </Text>
-                  </Button>
-                  <Text> </Text>
-                  {statusText(row)}
+            {visible.map(({ row, depth, branch, stem }) => {
+              const isRunning = row.status === 'running'
+              const isParty = row.status === 'done' && row.endedAt !== undefined && now - row.endedAt < PARTY_MS
+              const report = lastReport(row.id)
+              const message = lastMessage(row.id)
+              const accent = colorOf(row.type)
+              const isSub = depth > 0
+              const lead = `${stem}   `
+              return (
+                <Box flexDirection="column">
+                  <Text dimColor>{stem.replace(/ +$/, '') || '│'}</Text>
+                  <Box>
+                    <Box flexShrink={0}>
+                      <Text dimColor>{branch}</Text>
+                      {levelBadge(isSub)}
+                      <Text> </Text>
+                    </Box>
+                    <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                      <Button key={`agent-${row.id}`} plain onPress={select(row.id)}>
+                        {avatarOf(row.type)}{' '}
+                        <Text color={accent} bold dimColor={!isRunning && !isParty}>
+                          {row.name ?? row.type}
+                        </Text>
+                      </Button>
+                      <Text wrap="truncate-end"> {statusText(row)}</Text>
+                    </Box>
+                    <Box flexShrink={0} marginLeft={1}>
+                      <Text dimColor>{duration((row.endedAt ?? now) - row.startedAt)}</Text>
+                    </Box>
+                  </Box>
+                  {isSub && indented(lead, <Text color="magenta">↳ gestart door {badgeOf(row.parentId)}</Text>)}
+                  {indented(lead, row.task)}
+                  {indented(
+                    lead,
+                    <Text>
+                      <Text color={accent} dimColor={!isRunning}>
+                        {sparkline(row.toolTimes ?? [], now)}
+                      </Text>
+                      <Text dimColor>
+                        {'  '}
+                        {row.toolCount} tools{isRunning && row.tool ? ` · nu: ${row.tool}` : ''}
+                      </Text>
+                    </Text>,
+                  )}
+                  {row.skills.length > 0 && indented(lead, <Text color="magenta">🎒 {row.skills.join(' · ')}</Text>)}
+                  {message &&
+                    indented(
+                      lead,
+                      <Text>
+                        💬 → {nameOf(message.to)}: <Text dimColor>"{message.text}"</Text>
+                      </Text>,
+                      'truncate-end',
+                    )}
+                  {report && indented(lead, <Text dimColor>📦↑ "{report.text}"</Text>, 'truncate-end')}
                 </Box>
-                <Text dimColor>{duration((row.endedAt ?? now) - row.startedAt)}</Text>
-              </Box>
-              {isSub && (
-                <Text>
-                  <Text dimColor>{stem}   </Text>
-                  <Text color="magenta">↳ ingezet door {badgeOf(row.parentId)}</Text>
-                </Text>
-              )}
-              <Text>
-                <Text dimColor>{stem}   </Text>
-                {clip(row.task, textRoom)}
-              </Text>
-              <Text>
-                <Text dimColor>{stem}   </Text>
-                <Text color={accent} dimColor={!isRunning}>
-                  {sparkline(row.toolTimes ?? [], now)}
-                </Text>
-                <Text dimColor>
-                  {'  '}
-                  {row.toolCount} tools{isRunning && row.tool ? ` · nu: ${row.tool}` : ''}
-                </Text>
-              </Text>
-              {row.skills.length > 0 && (
-                <Text>
-                  <Text dimColor>{stem}   </Text>
-                  <Text color="magenta">🎒 {row.skills.join(' · ')}</Text>
-                </Text>
-              )}
-              {message && (
-                <Text>
-                  <Text dimColor>{stem}   </Text>
-                  <Text>💬 → {nameOf(message.to)}: </Text>
-                  <Text dimColor>"{clip(message.text, textRoom - 18)}"</Text>
-                </Text>
-              )}
-              {report && (
-                <Text>
-                  <Text dimColor>{stem}   </Text>
-                  <Text>📦↑ </Text>
-                  <Text dimColor>"{clip(report.text, textRoom - 6)}"</Text>
-                </Text>
-              )}
-            </Box>
-          )
-        })}
+              )
+            })}
+          </Box>
+        )}
 
-        </Box>
+        {shownSessions.length > 0 && (
+          <Box flexDirection="column" marginTop={1}>
+            <Text bold>🪟 Sessies {view === 'live' ? 'aan het werk' : 'afgerond'}</Text>
+            {shownSessions.map(s => {
+              const depth = sessionDepth(s)
+              const lead = '   '.repeat(depth)
+              const pr = s.prNumber !== undefined ? `PR #${s.prNumber}${s.prState ? ` · ${s.prState.toLowerCase()}` : ''}` : ''
+              return (
+                <Box flexDirection="column">
+                  <Box>
+                    <Box flexShrink={0}>
+                      <Text dimColor>{lead}{depth > 0 ? '└─ ' : ''}</Text>
+                      <Text backgroundColor="yellow" color="black" bold>
+                        {' SESSIE '}
+                      </Text>
+                      <Text> </Text>
+                    </Box>
+                    <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                      <Text wrap="truncate-end">
+                        🪟 <Text bold>{s.title}</Text>{' '}
+                        {s.isRunning ? (
+                          <Text color="yellow">{spin} Werkt…</Text>
+                        ) : (
+                          <Text color="green">✓ klaar</Text>
+                        )}
+                      </Text>
+                    </Box>
+                    <Box flexShrink={0} marginLeft={1}>
+                      <Text dimColor>{ago(now - s.lastActivityAt)}</Text>
+                    </Box>
+                  </Box>
+                  {indented(
+                    `${lead}   `,
+                    <Text dimColor>
+                      ↳ gestart door {s.startedBy && familyIds.has(s.startedBy) ? family.find(x => x.id === s.startedBy)?.title : 'deze sessie'}
+                      {pr ? ` · ${pr}` : ''}
+                    </Text>,
+                    'truncate-end',
+                  )}
+                  {insideOf(s, `${lead}   `)}
+                </Box>
+              )
+            })}
+          </Box>
         )}
 
         {showSkills && (
           <Box flexDirection="column" marginTop={1}>
             <Text bold>{view === 'live' ? '🎒 Skills in gebruik' : '🎒 Skills · wie, wat, wanneer'}</Text>
-            {skillLog.length === 0 && <Text dimColor>Nog geen skills ingezet.</Text>}
-            {skillLog.slice(-skillRoom).map(ev => (
-              <Text>
-                <Text dimColor>{stamp(ev.at)} </Text>
-                <Text color="magenta">{ev.name}</Text>
-                <Text dimColor> door </Text>
-                <Text>{badgeOf(ev.agentId)}</Text>
-              </Text>
-            ))}
+            {skillLog.length === 0 && <Text dimColor>Nog geen skills gebruikt.</Text>}
+            {skillLog.slice(-skillRoom).map(ev =>
+              indented(
+                `${stamp(ev.at)} `,
+                <Text>
+                  <Text color="magenta">{ev.name}</Text>
+                  <Text dimColor> door </Text>
+                  {badgeOf(ev.agentId)}
+                </Text>,
+              ),
+            )}
           </Box>
         )}
 
-        <Text> </Text>
-        <Text dimColor>
-          AGENT = ingezet door COMMAND · SUB-AGENT = ingezet door een andere agent · klik een naam voor details
-        </Text>
+        <Box marginTop={1}>
+          <Text dimColor wrap="wrap">
+            AGENT = gestart door de hoofdsessie · SUB-AGENT = gestart door een andere agent · klik een naam voor details
+          </Text>
+        </Box>
       </Box>
     )
   })
