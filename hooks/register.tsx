@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ActivityEvent, AgentRow, AgentStatus, Handover, SessionRow, SessionSnapshot, ViewFilter } from '../types'
-import { readSnapshots, resolveSelf, writeSnapshot } from './share'
+import { folderKey, readSnapshots, resolveSelf, writeSnapshot } from './share'
 
 const PANE = 'agent-monitor'
 const MAIN = 'main'
@@ -17,6 +17,9 @@ const SESSION_POLL_MS = 5_000
 const LIST_EVERY_POLLS = 4
 const SHARE_MS = 3_000
 const SHARED_AGENTS = 30
+// How often to ask the app who this session is before giving up (one try
+// per share tick, so about a minute).
+const SELF_TRIES = 20
 const SHARED_SKILLS = 20
 const REMOTE_ROWS = 6
 const LIST_SESSIONS_TOOL = 'mcp__ccd_session_mgmt__list_sessions'
@@ -45,7 +48,7 @@ const filter = atom({ plugin: 'agent-monitor', key: 'filter' } as const, 'live' 
   shape: 'filter-1',
 })
 const sessions = atom({ plugin: 'agent-monitor', key: 'sessions' } as const, [], {
-  shape: 'sessions-1',
+  shape: 'sessions-2',
 })
 const mainBusy = atom({ plugin: 'agent-monitor', key: 'mainBusy' } as const, false, {
   shape: 'mainBusy-1',
@@ -196,14 +199,17 @@ const flattenTree = (rows: AgentRow[]): Node[] => {
   return nodes
 }
 
-// Whether polling the session list is worth it: true once it found a linked
-// session or this session started one. Starts over with each reload.
+// Whether this session has linked sessions: true once the list showed one or
+// this session started one. Starts over with each reload.
 let isSessionFamilyKnown = false
 let isSyncing = false
-let hasPolled = false
 let pollCount = 0
 // This session's app id, once known, and the last snapshot it shared.
 let selfId: string | undefined
+let selfCwd = ''
+let selfTries = 0
+let isLearningSelf = false
+let isPaneOpened = false
 let lastShared = ''
 
 const toSessionRows = (text: string): Omit<SessionRow, 'firstSeenAt' | 'endedAt'>[] => {
@@ -218,6 +224,7 @@ const toSessionRows = (text: string): Omit<SessionRow, 'firstSeenAt' | 'endedAt'
           title: typeof item.title === 'string' ? item.title : item.sessionId,
           name: typeof item.name === 'string' ? item.name : undefined,
           startedBy: typeof item.startedBy === 'string' ? item.startedBy : undefined,
+          cwd: typeof item.cwd === 'string' ? item.cwd : undefined,
           isRunning: item.isRunning === true,
           prNumber: typeof item.prNumber === 'number' ? item.prNumber : undefined,
           prState: typeof item.prState === 'string' ? item.prState : undefined,
@@ -233,13 +240,15 @@ const toSessionRows = (text: string): Omit<SessionRow, 'firstSeenAt' | 'endedAt'
 // Reads this session's linked family from the app, only where the permission
 // check allows it without asking, so polling never opens a dialog.
 const syncSessions = async ($: EngineInterface): Promise<void> => {
-  // After the first look, keep polling only for a session that has a family.
-  if (isSyncing || (hasPolled && !isSessionFamilyKnown)) return
+  if (isSyncing) return
+  const isListDue = pollCount % LIST_EVERY_POLLS === 0
+  pollCount += 1
+  // Without a family yet there are no snapshots to read, only the list to
+  // look at now and then: the app's session tools may not be ready at start,
+  // and a family can appear later (a session started from here, or a reload).
+  if (!isListDue && !isSessionFamilyKnown) return
   isSyncing = true
-  hasPolled = true
   try {
-    const isListDue = pollCount % LIST_EVERY_POLLS === 0
-    pollCount += 1
     if (isListDue) {
       const input = { linked: true }
       const { decision } = await $.tool.check({ tool: LIST_SESSIONS_TOOL, input })
@@ -258,10 +267,28 @@ const syncSessions = async ($: EngineInterface): Promise<void> => {
         }),
       )
     }
-    const children = (await read($, sessions)).filter(s => s.startedBy !== undefined).map(s => s.id)
+    const rows = await read($, sessions)
+    const children = rows.filter(s => s.startedBy !== undefined)
     if (children.length > 0) {
-      const found = await readSnapshots($, children)
-      await update($, remote, () => found)
+      const found = await readSnapshots($, children.map(s => s.id))
+      // A child that never learned its own id shares under its folder instead;
+      // only a folder no other session here uses names one child for sure.
+      const keyOf = (cwd: string | undefined) => (cwd ? folderKey(cwd) : '')
+      const byFolder = children.filter(
+        s =>
+          !found[s.id] &&
+          keyOf(s.cwd) !== '' &&
+          keyOf(s.cwd) !== keyOf(selfCwd) &&
+          rows.filter(r => keyOf(r.cwd) === keyOf(s.cwd)).length === 1,
+      )
+      const viaFolder = await readSnapshots($, byFolder.map(s => folderKey(s.cwd ?? '')))
+      const matched = Object.fromEntries(
+        byFolder.flatMap(s => {
+          const snap = viaFolder[folderKey(s.cwd ?? '')]
+          return snap ? [[s.id, snap] as const] : []
+        }),
+      )
+      await update($, remote, () => ({ ...found, ...matched }))
     }
   } catch {
     // The tool is missing or refused here: no sessions to show.
@@ -270,10 +297,32 @@ const syncSessions = async ($: EngineInterface): Promise<void> => {
   }
 }
 
+// Asks the app who this session is; the app's session tools may not be ready
+// at start, so this is tried again while sharing until it answers.
+const learnSelf = async ($: EngineInterface): Promise<void> => {
+  if (selfId || isLearningSelf || selfTries >= SELF_TRIES) return
+  isLearningSelf = true
+  selfTries += 1
+  try {
+    const self = await resolveSelf($)
+    selfId = self?.id
+    // A session another one started is shown in its starter's pane, so it
+    // opens no pane of its own unless asked (/agent-monitor).
+    if (selfId && !self?.parentId && !isPaneOpened) {
+      isPaneOpened = true
+      await $.ui.open({ id: PANE, title: 'Agents' })
+    }
+  } finally {
+    isLearningSelf = false
+  }
+}
+
 // Shares what this session does with the session that started it, when it
-// changed; nothing is written before this session knows its own app id.
+// changed: under its app id once known, and always under its folder, which
+// the starter also knows from the app's session list.
 const shareSnapshot = async ($: EngineInterface): Promise<void> => {
-  if (!selfId) return
+  await learnSelf($)
+  if (!selfCwd) return
   const rows = await read($, agents)
   const log = await read($, events)
   const main = rows.find(r => r.id === MAIN)
@@ -292,7 +341,9 @@ const shareSnapshot = async ($: EngineInterface): Promise<void> => {
   const text = JSON.stringify(body)
   if (text === lastShared) return
   lastShared = text
-  await writeSnapshot($, { id: selfId, updatedAt: Date.now(), ...body })
+  const updatedAt = Date.now()
+  if (selfId) await writeSnapshot($, { id: selfId, updatedAt, ...body })
+  await writeSnapshot($, { id: folderKey(selfCwd), updatedAt, ...body })
 }
 
 export const register: Register = on => {
@@ -321,12 +372,14 @@ export const register: Register = on => {
     // linked-session list is the only place that knows them, so poll it.
     void syncSessions($)
     $.clock.every(SESSION_POLL_MS, () => void syncSessions($))
-    // Let the session that started this one see inside it. A session another
-    // one started is shown in its starter's pane, so it opens no pane of its
-    // own unless asked (/agent-monitor).
-    void resolveSelf($).then(self => {
-      selfId = self?.id
-      if (!self?.parentId) void $.ui.open({ id: PANE, title: 'Agents' })
+    // Let the session that started this one see inside it.
+    selfCwd = e.cwd
+    void learnSelf($).then(() => {
+      // The app could not say who this session is: show the pane anyway.
+      if (!selfId && !isPaneOpened) {
+        isPaneOpened = true
+        void $.ui.open({ id: PANE, title: 'Agents' })
+      }
     })
     $.clock.every(SHARE_MS, () => void shareSnapshot($))
     return next(e)
@@ -376,6 +429,7 @@ export const register: Register = on => {
     if (SESSION_START_TOOLS.includes(e.tool)) {
       isSessionFamilyKnown = true
       const res = await next(e)
+      pollCount = 0
       void syncSessions($)
       return res
     }

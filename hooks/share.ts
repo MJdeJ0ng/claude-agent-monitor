@@ -19,6 +19,15 @@ export function liveDirOf(pluginRoot: string): string {
   return `${base}/${LIVE_FOLDER}`
 }
 
+// The name a session shares under when it cannot learn its app id: its
+// working folder, which its starter sees in the app's session list. Windows
+// folders ignore case and slash direction, so neither counts.
+export function folderKey(cwd: string): string {
+  const folder = cwd.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  const h = [...folder].reduce((n, c) => (Math.imul(n, 31) + c.charCodeAt(0)) >>> 0, 7)
+  return `cwd_${h.toString(36)}`
+}
+
 // This session as the app knows it: its id (`local_…`), which is how the
 // session that started it names it, and that starter's id, if any. Only asked
 // where the permission check allows it without a dialog.

@@ -157,6 +157,61 @@ test("a child session's agents and skills show under its row", async ($, on) => 
   await ui.unmount()
 })
 
+test("a child that could not learn its id is found by its folder", async ($, on) => {
+  const snapshot = {
+    id: 'cwd_x',
+    updatedAt: Date.now(),
+    isMainBusy: true,
+    mainTool: 'Edit',
+    agents: [
+      { id: 'c1', parentId: 'main', seq: 1, label: '#1', type: 'Explore', task: 'Wire up autosave', status: 'running', startedAt: Date.now() - 4000, skills: [], toolCount: 1, toolTimes: [] },
+    ],
+    skills: [],
+  }
+  on('clock.every', () => ({ value: undefined }))
+  on('command.register', () => ({ value: { command: 'agent-monitor' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('tool.check', () => ({ decision: 'allow' as const }))
+  // Only the folder file exists: the child never wrote one under its id.
+  on('fs.read', (_, e) => ({ value: e.path.includes('cwd_') ? JSON.stringify(snapshot) : '' }))
+  on('tool.call', (_, e) =>
+    e.tool === 'mcp__ccd_session_mgmt__list_sessions'
+      ? {
+          result: {},
+          text: JSON.stringify([
+            { sessionId: 'local_1', title: 'Implement autosave', cwd: 'C:\\repo\\.claude\\worktrees\\autosave', isRunning: true, isArchived: false, lastActivityAt: new Date().toISOString(), startedBy: 'local_me' },
+          ]),
+        }
+      : { result: {}, text: '{}' },
+  )
+  await $.session.start({ cwd: 'C:\\repo', surface: 'desktop', isInteractive: true })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /Implement autosave/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Wire up autosave/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a session started from here shows even when the first look found none', async ($, on) => {
+  let list: unknown[] = []
+  on('clock.every', () => ({ value: undefined }))
+  on('command.register', () => ({ value: { command: 'agent-monitor' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('tool.check', () => ({ decision: 'allow' as const }))
+  on('tool.call', (_, e) =>
+    e.tool === 'mcp__ccd_session_mgmt__list_sessions' ? { result: {}, text: JSON.stringify(list) } : { result: {}, text: '{}' },
+  )
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  list = [{ sessionId: 'local_2', title: 'Build login', isRunning: true, isArchived: false, lastActivityAt: new Date().toISOString(), startedBy: 'local_me' }]
+  await $.tool.call({ tool: 'mcp__ccd_session__start_session', title: 'Build login' } as never)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /Build login/ })).toBeDefined()
+  await ui.unmount()
+})
+
 test('a session another one started opens no pane of its own', async ($, on) => {
   let opened = 0
   on('clock.every', () => ({ value: undefined }))

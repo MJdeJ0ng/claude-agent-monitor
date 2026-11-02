@@ -32,6 +32,7 @@ export type SessionRow = {
   title: string
   name?: string
   startedBy?: string
+  cwd?: string
   isRunning: boolean
   prNumber?: number
   prState?: string
