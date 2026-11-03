@@ -40,6 +40,8 @@ export type Words = {
   stopYes: string
   cancel: string
   messageHint: string
+  flowHint: string
+  flowBusy: string
 }
 
 export const WAR: Words = {
@@ -99,6 +101,8 @@ export const WAR: Words = {
   stopYes: 'Yes, halt',
   cancel: 'Stand fast',
   messageHint: 'Send a telegram…',
+  flowHint: 'Hover a box for its orders. Moving lines are live work; ◐ pulses for you.',
+  flowBusy: 'Directing operations',
 }
 
 export const PLAIN: Words = {
@@ -156,6 +160,8 @@ export const PLAIN: Words = {
   stopYes: 'Yes, stop',
   cancel: 'Cancel',
   messageHint: 'Send a message…',
+  flowHint: 'Hover a box for its task. Moving lines are live work; ◐ pulses for you.',
+  flowBusy: 'Working',
 }
 
 export const wordsFor = (isPlain: boolean): Words => (isPlain ? PLAIN : WAR)

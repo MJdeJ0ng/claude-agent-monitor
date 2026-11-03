@@ -5,6 +5,7 @@ import { DONE_SESSION_ROWS, LINES_PER_AGENT, MAIN, NEEDS_YOU_ROWS, PARTY_MS, SES
 import { waitsOf } from '../waits'
 import type { Ctx } from './context'
 import { doneList } from './done'
+import { flowView } from './flow'
 import { insideOf } from './inside'
 import type { Parts } from './parts'
 
@@ -39,6 +40,8 @@ export const treeView = (c: Ctx, p: Parts) => {
   const room = Math.max(1, Math.floor((lines - 10 - skillRoom) / LINES_PER_AGENT))
   const visible = nodes.slice(-room)
   const historyRoom = Math.max(1, Math.floor((lines - 11 - skillRoom) / 4))
+  // Live as a flowchart where the surface draws one and the person wants it.
+  const isFlow = view === 'live' && c.isFlowView
   const tabs = (
     <Box gap={2} marginTop={1} flexWrap="wrap">
       <Button key="tab-live" variant={view === 'live' ? 'primary' : 'secondary'} onPress={setView('live')}>
@@ -47,6 +50,11 @@ export const treeView = (c: Ctx, p: Parts) => {
       <Button key="tab-done" variant={view === 'done' ? 'primary' : 'secondary'} onPress={setView('done')}>
         ✓ Done ({finished.length + childSessions.length - openSessions})
       </Button>
+      {c.canDraw && (
+        <Button key="layout" variant="secondary" onPress={c.switchLayout}>
+          {c.isFlowView ? '▤ CLI view' : '◇ UI view'}
+        </Button>
+      )}
     </Box>
   )
 
@@ -88,8 +96,14 @@ export const treeView = (c: Ctx, p: Parts) => {
       {tabs}
 
       {view === 'done' && doneList(c, p, finished, historyRoom)}
+      {isFlow &&
+        flowView(
+          c,
+          rows.filter(r => r.id !== MAIN && liveIds.has(r.id)),
+          shownSessions,
+        )}
 
-      {view === 'live' && nodes.length === 0 && openSessions === 0 && (
+      {view === 'live' && !isFlow && nodes.length === 0 && openSessions === 0 && (
         <Box flexDirection="column">
           <Text dimColor>│</Text>
           {indented(
@@ -102,7 +116,7 @@ export const treeView = (c: Ctx, p: Parts) => {
           )}
         </Box>
       )}
-      {view === 'live' && (
+      {view === 'live' && !isFlow && (
         <Box flexDirection="column">
           {nodes.length > room && <Text dimColor>│  ⋮ {nodes.length - room} earlier agents folded</Text>}
 
@@ -170,7 +184,7 @@ export const treeView = (c: Ctx, p: Parts) => {
         </Box>
       )}
 
-      {shownSessions.length > 0 && (
+      {shownSessions.length > 0 && !isFlow && (
         <Box flexDirection="column" marginTop={1}>
           <Text bold>{view === 'live' ? w.sessionsLive : w.sessionsDone}</Text>
           {shownSessions.map(s => {

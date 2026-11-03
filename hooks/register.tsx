@@ -2,7 +2,7 @@ import { atom, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import { addHandover, clip, mainRow } from './format'
-import { loadArchive, loadPlain } from './history'
+import { loadArchive, loadLayout, loadPlain } from './history'
 import { learnSelf, shareSnapshot, syncSessions } from './sessions'
 import {
   GET_SESSION_TOOL,
@@ -67,6 +67,7 @@ export const register: Register = on => {
     // Let the session that started this one see inside it.
     live.selfCwd = e.cwd
     void loadPlain($)
+    void loadLayout($)
     void loadArchive($)
     // The app could not say who this session is, or takes too long to: show
     // the pane anyway, unless it is known to be another session's child.
@@ -192,7 +193,8 @@ export const register: Register = on => {
 
   // The pane: one agent, one child session, or the whole tree.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const c = await renderContext($, $.ui.resolve(e), e.viewport?.rows ?? 30)
+    // The pane's own width (its body's cells), not the whole surface's.
+    const c = await renderContext($, $.ui.resolve(e), e.viewport?.rows ?? 30, e.surface, e.props.bodyColumns)
     const p = partsOf(c)
     const focused = c.focusId ? c.rows.find(r => r.id === c.focusId) : undefined
     if (focused) return agentDetail(c, p, focused)

@@ -46,6 +46,10 @@ export type Handover = {
   text: string
 }
 
+// How the Live view is drawn: as text (cli) or as a flowchart (ui); unset,
+// each surface takes its own default.
+export type LayoutMode = '' | 'cli' | 'ui'
+
 export type ViewFilter = 'live' | 'done'
 
 export type SessionRow = {
@@ -107,6 +111,7 @@ declare module 'claude-code' {
       archive: Shaped<ArchivedAgent[]>
       confirmStop: Shaped<string>
       sent: Shaped<number>
+      layout: Shaped<LayoutMode>
     }
   }
 }

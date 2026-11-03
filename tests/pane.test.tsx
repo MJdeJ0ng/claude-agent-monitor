@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
+import { flowchartSvg, layoutFlow } from '../hooks/flowchart'
 import { normalizeRow, reconcile } from '../hooks/roster'
 import { collapseRepeats, compactCount, firstSentence, isLooping, phaseOf, subtreeTotals } from '../hooks/signals'
 
@@ -61,7 +62,7 @@ test('an agent and its sub-agent show live, then move to Done', async ($, on) =>
   await $.agent.spawn({ prompt: 'Dig deeper', description: 'Dig deeper', subagentType: 'Explore', parentAgentId: 'a1' } as never)
 
   for (const surface of SURFACES) {
-    const ui = await $.ui.mount({ ...PANE, surface })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     expect(await ui.find({ type: 'Text', text: /^ AGENT $/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^ SUB-AGENT $/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Find auth/ })).toBeDefined()
@@ -72,7 +73,7 @@ test('an agent and its sub-agent show live, then move to Done', async ($, on) =>
   await $.turn.complete({ answer: 'found it', durationMs: 5, isAborted: false, turnId: 'x1', agentId: 'a2', reason: 'answer' })
   await $.turn.complete({ answer: 'all done', durationMs: 9, isAborted: false, turnId: 'x2', agentId: 'a1', reason: 'answer' })
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /All quiet|busy itself/ })).toBeDefined()
   await ui.press({ key: 'tab-done' })
   expect(await ui.find({ type: 'Text', text: /all done/ })).toBeDefined()
@@ -152,7 +153,7 @@ test("a child session's agents and skills show under its row", async ($, on) => 
   )
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Refine login/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Scan the login flow/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Cracking Enigma|Decoding JN-25 at Station Hypo|Scouting from a PBY Catalina/ })).toBeDefined()
@@ -195,7 +196,7 @@ test("a child that could not learn its id is found by its folder", async ($, on)
   )
   await $.session.start({ cwd: 'C:\\repo', surface: 'desktop', isInteractive: true })
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Implement autosave/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Wire up autosave/ })).toBeDefined()
   await ui.unmount()
@@ -282,7 +283,7 @@ test("tokens show per agent and add up under its parent", async ($, on) => {
     }
   }
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Σ 3\.0k tok/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /1\.5k tok/ })).toBeDefined()
   await ui.press({ key: 'agent-a1' })
@@ -346,14 +347,14 @@ test('files an agent edits show, with a warning when another busy agent edits on
   await $.tool.call({ tool: 'Edit', file_path: 'C:/repo/src/auth.ts', agentId: 'a1' } as never)
   await $.tool.call({ tool: 'Edit', file_path: 'C:/repo/src/auth.ts', agentId: 'a2' } as never)
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /1 file: auth\.ts/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /auth\.ts is also being edited by/ })).toBeDefined()
   await ui.unmount()
 
   // A second file joins the first rather than replacing it.
   await $.tool.call({ tool: 'Write', file_path: 'C:/repo/src/session.ts', agentId: 'a1' } as never)
-  const again = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await again.find({ type: 'Text', text: /2 files: session\.ts, auth\.ts/ })).toBeDefined()
   await again.unmount()
 })
@@ -426,7 +427,7 @@ test('an open child session that is not working waits under Live, not Done', asy
   )
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ key: 'tab-live' }))?.text).toContain('(2)')
   expect(await ui.find({ type: 'Text', text: /Build #86/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Standing by for orders/ })).toBeDefined()
@@ -465,7 +466,7 @@ test("a child session whose turn ended but whose agent still works counts as bus
   )
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /On manoeuvres/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Standing by/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /Reading the dispatches|Listening to the Navajo code talkers/ })).toBeDefined()
@@ -508,7 +509,7 @@ test('an agent whose steps arrive without a spawn still shows', async ($, on) =>
   await $.turn.start({ text: 'go', turnId: 't1' })
   await $.tool.call({ tool: 'Grep', pattern: 'paint', agentId: 'wf1' } as never)
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /workflow agent/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /now: Grep · paint/ })).toBeDefined()
   await ui.unmount()
@@ -540,7 +541,7 @@ test("a child session's snapshot from another version does not break the pane", 
   )
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Old child/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Old-style row/ })).toBeDefined()
   await ui.unmount()
@@ -663,4 +664,107 @@ test("a child session's turn can be stopped (after a confirm) and sent a message
   expect(sent?.input).toContain('Please rebase on main first.')
   expect(sent?.input).toContain('"session_id":"local_1"')
   await ui.unmount()
+})
+
+test('on desktop Live is a flowchart of the work in progress, and the switch brings back the text view', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.agent.spawn({ prompt: 'Find auth handlers', description: 'Find auth', subagentType: 'Explore' } as never)
+  await $.tool.call({ tool: 'Grep', pattern: 'auth', agentId: 'a1' })
+  await $.agent.spawn({ prompt: 'Dig deeper', description: 'Dig <deeper>', subagentType: 'Plan', parentAgentId: 'a1' } as never)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const chart = await ui.find({ type: 'Svg' })
+  const source = String(chart?.props.source ?? '')
+  expect(source).toContain('War Room')
+  expect(source).toContain('Explore')
+  expect(source).toContain('Plan')
+  // A live line into each agent at work, and the task in a hover, escaped.
+  expect(source.match(/class="live"/g)?.length).toBe(2)
+  expect(source).toContain('Dig &lt;deeper&gt;')
+  expect(await ui.find({ key: 'agent-a2' })).toBeDefined()
+
+  await ui.press({ key: 'layout' })
+  expect(await ui.find({ type: 'Svg' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^ SUB-AGENT $/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a terminal pane has no flowchart and no switch', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ prompt: 'Find auth', description: 'Find auth', subagentType: 'Explore' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Svg' })).toBeUndefined()
+  expect(await ui.find({ key: 'layout' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('flowchart: children sit right of their parent, a session is a lane', () => {
+  const { placed, width } = layoutFlow([
+    { id: 'main', title: 'War Room', line: '', state: 'main', tip: '' },
+    { id: 'a1', parentId: 'main', title: 'Explore', line: '', state: 'working', tip: '' },
+    { id: 'a2', parentId: 'a1', title: 'Plan', line: '', state: 'waiting', tip: '' },
+    { id: 's1', parentId: 'main', title: 'Build #100', line: '', state: 'session', tip: '', lane: [{ depth: 0, title: 'Architect', line: 'x', state: 'working', tip: '' }] },
+  ])
+  const at = (id: string) => placed.find(p => p.node.id === id)
+  expect((at('a1')?.x ?? 0) > (at('main')?.x ?? 0)).toBe(true)
+  expect((at('a2')?.x ?? 0) > (at('a1')?.x ?? 0)).toBe(true)
+  expect(at('s1')?.x).toBe(at('a1')?.x)
+  expect((at('s1')?.h ?? 0) > (at('a1')?.h ?? 0)).toBe(true)
+  // Two siblings never overlap.
+  const a1 = at('a1')
+  const s1 = at('s1')
+  expect(a1 && s1 && (a1.y + a1.h <= s1.y || s1.y + s1.h <= a1.y)).toBe(true)
+  expect(width > 0).toBe(true)
+  expect(flowchartSvg([]).startsWith('<svg')).toBe(true)
+})
+
+test('the flowchart keeps the same source while nothing changes, and is sized to the pane', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.agent.spawn({ prompt: 'Find auth', description: 'Find auth', subagentType: 'Explore' } as never)
+  await $.tool.call({ tool: 'Grep', pattern: 'auth', agentId: 'a1' })
+
+  const first = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const before = await first.find({ type: 'Svg' })
+  await first.unmount()
+  await new Promise<void>(resolve => setTimeout(() => resolve(), 1_100))
+  const second = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const after = await second.find({ type: 'Svg' })
+  await second.unmount()
+
+  expect(after?.props.source).toBe(before?.props.source)
+
+  // A new step changes the text under the drawing, not the drawing.
+  await $.tool.call({ tool: 'Read', file_path: 'src/auth.ts', agentId: 'a1' } as never)
+  const third = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await third.find({ type: 'Svg' }))?.props.source).toBe(before?.props.source)
+  expect(await third.find({ type: 'Text', text: /now: Read · src\/auth\.ts/ })).toBeDefined()
+  await third.unmount()
+  // One to one in pixels, no wider than the pane (60 cells here).
+  expect(typeof before?.props.width).toBe('number')
+  expect(Number(before?.props.width) <= 60 * 7.5).toBe(true)
+  expect(Number(before?.props.height) > 0).toBe(true)
+})
+
+test('flowchart: in a narrow pane deeper agents stack under their parent instead of on it', () => {
+  const nodes = [
+    { id: 'main', title: 'War Room', line: '', state: 'main' as const, tip: '' },
+    { id: 'a1', parentId: 'main', title: 'Explore', line: '', state: 'working' as const, tip: '' },
+    { id: 'a2', parentId: 'a1', title: 'Reviewer', line: '', state: 'waiting' as const, tip: '' },
+  ]
+  const { placed, width } = layoutFlow(nodes, 420)
+  const at = (id: string) => placed.find(p => p.node.id === id)
+  const a1 = at('a1')
+  const a2 = at('a2')
+  expect(a2?.column).toBe(a1?.column)
+  expect((a2?.x ?? 0) > (a1?.x ?? 0)).toBe(true)
+  expect((a2?.y ?? 0) >= (a1?.y ?? 0) + (a1?.h ?? 0)).toBe(true)
+  expect(width <= 420).toBe(true)
+  // Wide enough, each level gets its own column.
+  const wide = layoutFlow(nodes, 900)
+  expect(wide.placed.find(p => p.node.id === 'a2')?.column).toBe(2)
 })

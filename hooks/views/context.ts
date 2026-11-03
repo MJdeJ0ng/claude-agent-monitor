@@ -1,10 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface } from 'claude-code'
 
-import type { ArchivedAgent, SessionRow, SessionSnapshot, ViewFilter } from '../../types'
+import type { ArchivedAgent, LayoutMode, SessionRow, SessionSnapshot, ViewFilter } from '../../types'
 import { SPINNER, avatarOf, clip, duration } from '../format'
 import { messageSession, stopSession } from '../command'
-import { togglePlain } from '../history'
+import { setLayout, togglePlain } from '../history'
 import { isSessionBusy, ownSessions, subtreeTotals } from '../signals'
 import { MAIN, SHAPES, live } from '../state'
 import { wordsFor } from '../wording'
@@ -51,17 +51,26 @@ const confirmStop = atom({ plugin: 'agent-monitor', key: 'confirmStop' } as cons
 const sent = atom({ plugin: 'agent-monitor', key: 'sent' } as const, 0, {
   shape: SHAPES.sent,
 })
+const layout = atom({ plugin: 'agent-monitor', key: 'layout' } as const, '' as LayoutMode, {
+  shape: SHAPES.layout,
+})
 const tick = atom({ plugin: 'agent-monitor', key: 'tick' } as const, 0, {
   shape: SHAPES.tick,
 })
 
+// The surface whose pane draws the flowchart: the desktop app's; a terminal
+// draws text only.
+const DRAWING_SURFACE = 'desktop'
+
 // The elements the views draw with, the same on every surface; a text field
-// only where the surface has one.
-export type UiKit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'> & Partial<Pick<Elements['terminal'], 'Input'>>
+// and a drawing only where the surface has them.
+export type UiKit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'> &
+  Partial<Pick<Elements['terminal'], 'Input'>> &
+  Partial<Pick<Elements['desktop'], 'Svg'>>
 
 export type Ctx = Awaited<ReturnType<typeof renderContext>>
 
-export async function renderContext($: EngineInterface, ui: UiKit, lines: number) {
+export async function renderContext($: EngineInterface, ui: UiKit, lines: number, surface: string, columns?: number) {
   const rows = await read($, agents)
   const moves = await read($, handovers)
   const log = await read($, events)
@@ -77,6 +86,11 @@ export async function renderContext($: EngineInterface, ui: UiKit, lines: number
   const isMainBusy = await read($, mainBusy)
   const stopping = await read($, confirmStop)
   const sentCount = await read($, sent)
+  // The flowchart where the surface can draw one: the person's choice, else
+  // the flowchart by default.
+  const canDraw = surface === DRAWING_SURFACE && ui.Svg !== undefined
+  const chosen = await read($, layout)
+  const isFlowView = canDraw && chosen !== 'cli'
   const spin = SPINNER[beat % SPINNER.length]
   const opStart = rows.find(r => r.id === MAIN)?.startedAt ?? now
   const stamp = (at: number): string => `T+${duration(at - opStart)}`
@@ -100,6 +114,7 @@ export async function renderContext($: EngineInterface, ui: UiKit, lines: number
     void update($, expanded, list => (list.includes(key) ? list.filter(k => k !== key) : [...list, key]))
   const setView = (next: ViewFilter) => () => void update($, filter, () => next)
   const switchWords = () => void togglePlain($)
+  const switchLayout = () => void setLayout($, isFlowView ? 'cli' : 'ui')
   const openTranscript = (agentId: string) => () => void $.ui.view({ agentId })
   // Stopping a child session's turn takes two presses: ask, then confirm.
   const askStop = (sessionId: string) => () => void update($, confirmStop, () => sessionId)
@@ -146,6 +161,7 @@ export async function renderContext($: EngineInterface, ui: UiKit, lines: number
   return {
     ui,
     lines,
+    columns,
     rows,
     moves,
     log,
@@ -168,6 +184,9 @@ export async function renderContext($: EngineInterface, ui: UiKit, lines: number
     setView,
     switchWords,
     openTranscript,
+    canDraw,
+    isFlowView,
+    switchLayout,
     stopping,
     sentCount,
     askStop,
