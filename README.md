@@ -4,6 +4,9 @@ A live pane inside Claude Code that shows which agents and sub-agents are runnin
 
 - **● Live / ✓ Done tabs**: the live tree shows only agents at work (with the agents above them for context); Done is the history of finished agents, newest first.
 - **AGENT / SUB-AGENT labels**: AGENT = started by the main session, SUB-AGENT = started by another agent.
+- **📯 Needs you**: agents and child sessions waiting for your permission answer sit at the top, longest wait first, with one short bugle call and a toast when a wait starts (the main session's own question is already in front of you, so it is left out).
+- **Four states**: ● on the move, ◐ needs you, ○ radio silence (no step or tool for 1.5 minutes while nothing runs), ✕ in trouble; 🔁 marks an agent repeating the same call.
+- **Tokens**: per agent, from each model step, with Σ adding up everything under an agent; the detail view also shows the model.
 - **Detail view**: click an agent's name for its full task, a timeline of tools, skills, sub-agents and reports, and a button that opens its transcript.
 - **Skills**: which skill was used, by whom, and when.
 - **Sessions**: sessions started from this one (an orchestrator's workers) are listed with their status and PR; where they run the mod too, their own agents, sub-agents, skills and current activity show under their row. Each session shares this through a small file in `~/.claude/agent-monitor-live/`.

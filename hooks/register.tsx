@@ -3,6 +3,17 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { ActivityEvent, AgentRow, AgentStatus, Handover, SessionRow, SessionSnapshot, ViewFilter } from '../types'
 import { folderKey, readSnapshots, resolveSelf, writeSnapshot } from './share'
+import {
+  NEEDS_YOU_GRACE_MS,
+  PHASES,
+  SILENCE_MS,
+  collapseRepeats,
+  compactCount,
+  isLooping,
+  phaseOf,
+  shortModel,
+  subtreeTotals,
+} from './signals'
 
 const PANE = 'agent-monitor'
 const MAIN = 'main'
@@ -29,11 +40,13 @@ const PARTY_MS = 15_000
 const SKILL_DEDUPE_MS = 3_000
 const SPARK_BUCKETS = 12
 const SPARK_BUCKET_MS = 2_500
+const NEEDS_YOU_SOUND = 'sounds/needs-you.wav'
+const NEEDS_YOU_ROWS = 5
 
 // Change a shape tag when a row's fields change: it declines what an earlier
 // version stored, which outlives a reload.
 const agents = atom({ plugin: 'agent-monitor', key: 'agents' } as const, [], {
-  shape: 'agents-4',
+  shape: 'agents-5',
 })
 const handovers = atom({ plugin: 'agent-monitor', key: 'handovers' } as const, [], {
   shape: 'handovers-1',
@@ -329,6 +342,8 @@ const shareSnapshot = async ($: EngineInterface): Promise<void> => {
   const body = {
     isMainBusy: await read($, mainBusy),
     mainTool: main?.tool,
+    mainWaitingSince: main?.waitingSince,
+    mainWaitingTool: main?.waitingTool,
     agents: rows
       .filter(r => r.id !== MAIN)
       .slice(-SHARED_AGENTS)
@@ -344,6 +359,53 @@ const shareSnapshot = async ($: EngineInterface): Promise<void> => {
   const updatedAt = Date.now()
   if (selfId) await writeSnapshot($, { id: selfId, updatedAt, ...body })
   await writeSnapshot($, { id: folderKey(selfCwd), updatedAt, ...body })
+}
+
+// Waits the person has been told about, by agent or session key.
+const announced = new Set<string>()
+
+type Wait = { key: string; since: number; who: string; tool?: string; agentId?: string }
+
+// Everything waiting on the person: this session's agents and, from their
+// snapshots, the sessions it started and their agents. This session's own
+// question is on screen already, so it is not listed.
+const waitsOf = (rows: AgentRow[], family: SessionRow[], inside: Record<string, SessionSnapshot>, now: number): Wait[] => {
+  const local = rows
+    .filter(r => r.id !== MAIN && phaseOf(r, now) === 'waiting')
+    .map(r => ({ key: r.id, since: r.waitingSince ?? now, who: `${avatarOf(r.type)} ${r.name ?? r.type}`, tool: r.waitingTool, agentId: r.id }))
+  const remoteWaits = family
+    .filter(s => s.isRunning && inside[s.id])
+    .flatMap(s => {
+      const snap = inside[s.id]
+      if (!snap) return []
+      const own =
+        snap.mainWaitingSince !== undefined && now - snap.mainWaitingSince >= NEEDS_YOU_GRACE_MS
+          ? [{ key: `${s.id}:main`, since: snap.mainWaitingSince, who: `🪟 ${s.title}`, tool: snap.mainWaitingTool }]
+          : []
+      const theirs = snap.agents
+        .filter(a => phaseOf(a, now) === 'waiting')
+        .map(a => ({ key: `${s.id}:${a.id}`, since: a.waitingSince ?? now, who: `🪟 ${s.title} › ${a.name ?? a.type}`, tool: a.waitingTool }))
+      return [...own, ...theirs]
+    })
+  return [...local, ...remoteWaits].sort((a, b) => a.since - b.since)
+}
+
+// One bugle call and toast per new wait; nothing while it keeps waiting.
+const announceWaits = async ($: EngineInterface): Promise<void> => {
+  const waits = waitsOf(await read($, agents), await read($, sessions), await read($, remote), Date.now())
+  const keys = new Set(waits.map(w => w.key))
+  for (const key of [...announced]) if (!keys.has(key)) announced.delete(key)
+  const fresh = waits.filter(w => !announced.has(w.key))
+  if (fresh.length === 0) return
+  for (const w of fresh) announced.add(w.key)
+  const first = fresh[0]
+  if (!first) return
+  void $.ui.toast(`📯 ${first.who} needs you${first.tool ? `: may it use ${first.tool}?` : ''}`)
+  try {
+    await $.audio.play({ asset: NEEDS_YOU_SOUND }, { shouldLoop: false, gain: 0.6 })
+  } catch {
+    // No player here (a Windows or Linux terminal): the toast says it.
+  }
 }
 
 export const register: Register = on => {
@@ -366,7 +428,10 @@ export const register: Register = on => {
         rows.some(
           r => r.id !== MAIN && (r.status === 'running' || (r.endedAt !== undefined && now - r.endedAt < PARTY_MS)),
         )
-      if (isLively) await update($, tick, n => n + 1)
+      if (isLively) {
+        await update($, tick, n => n + 1)
+        await announceWaits($)
+      }
     })
     // Sessions started from this one live in their own windows; the app's
     // linked-session list is the only place that knows them, so poll it.
@@ -444,6 +509,8 @@ export const register: Register = on => {
           tool: e.tool,
           toolCount: r.toolCount + 1,
           toolTimes: [...(r.toolTimes ?? []), now].slice(-MAX_TOOL_TIMES),
+          inFlight: (r.inFlight ?? 0) + 1,
+          lastActivityAt: now,
         }
         return skill ? withSkill(touched, skill) : touched
       }),
@@ -452,7 +519,49 @@ export const register: Register = on => {
       const withTool = addEvent(list, { at: now, agentId: who, kind: 'tool', name: e.tool, detail: detailOf(input) })
       return skill ? addEvent(withTool, { at: now, agentId: who, kind: 'skill', name: skill }) : withTool
     })
-    return next(e)
+    // The permission question, if any, is settled once the call returns.
+    try {
+      return await next(e)
+    } finally {
+      await update($, agents, list =>
+        patch(list, who, r => ({
+          ...r,
+          inFlight: Math.max(0, (r.inFlight ?? 1) - 1),
+          waitingSince: undefined,
+          waitingTool: undefined,
+          lastActivityAt: Date.now(),
+        })),
+      )
+    }
+  })
+
+  // A tool call the engine would ask the person about: the agent may now be
+  // waiting on them. Only the model's own calls count (they carry an id); a
+  // plugin's probe asks no one.
+  on('tool.check', async ($, e, next) => {
+    const res = await next(e)
+    if (res.decision === 'ask' && e.tool_use_id && e.tool !== LIST_SESSIONS_TOOL && e.tool !== GET_SESSION_TOOL) {
+      const who = e.agentId ?? MAIN
+      await update($, agents, list =>
+        patch(list, who, r => ({ ...r, waitingSince: r.waitingSince ?? Date.now(), waitingTool: e.tool })),
+      )
+    }
+    return res
+  })
+
+  // Each model step: what it cost and which model answered.
+  on('turn.step', async function* ($, e, next) {
+    const res = yield* next(e)
+    const usage = res?.usage
+    const who = e.agentId ?? MAIN
+    if (usage) {
+      const used =
+        usage.input_tokens + usage.output_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+      await update($, agents, list =>
+        patch(list, who, r => ({ ...r, tokens: (r.tokens ?? 0) + used, model: usage.model, lastActivityAt: Date.now() })),
+      )
+    }
+    return res
   })
 
   // A skill typed as /name by the person: the Skill tool above covers the
@@ -487,7 +596,9 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (!e.agentId) {
       await update($, mainBusy, () => false)
-      await update($, agents, list => patch(list, MAIN, r => ({ ...r, tool: undefined })))
+      await update($, agents, list =>
+        patch(list, MAIN, r => ({ ...r, tool: undefined, waitingSince: undefined, waitingTool: undefined, inFlight: 0 })),
+      )
     }
     if (e.agentId) {
       const id = e.agentId
@@ -498,7 +609,15 @@ export const register: Register = on => {
       const row = rows.find(r => r.id === id)
       const parentId = row?.parentId || MAIN
       await update($, agents, list =>
-        patch(list, id, r => ({ ...r, status, endedAt: now, tool: undefined })),
+        patch(list, id, r => ({
+          ...r,
+          status,
+          endedAt: now,
+          tool: undefined,
+          waitingSince: undefined,
+          waitingTool: undefined,
+          inFlight: 0,
+        })),
       )
       if (e.answer) {
         await update($, handovers, list =>
@@ -571,11 +690,38 @@ export const register: Register = on => {
       </Text>
     )
 
+    const totals = subtreeTotals(rows)
+    const callsOf = (id: string) => log.filter(ev => ev.kind === 'tool' && ev.agentId === id)
+    // Tokens on a row: its own, or Σ with every agent under it when it has some.
+    const usageOf = (row: AgentRow): string => {
+      const t = totals.get(row.id)
+      if (!t || t.tokens === 0) return ''
+      return t.agents > 0 ? ` · Σ ${compactCount(t.tokens)} tok` : ` · ${compactCount(t.tokens)} tok`
+    }
+
     const statusText = (row: AgentRow) => {
       if (row.status === 'running') {
+        const phase = phaseOf(row, now)
+        const loop = isLooping(callsOf(row.id)) ? <Text color="yellow"> 🔁 circling the airfield</Text> : null
+        if (phase === 'waiting') {
+          return (
+            <Text color={PHASES.waiting.color} bold>
+              {PHASES.waiting.glyph} Needs you{row.waitingTool ? `: may it use ${row.waitingTool}?` : ''} ·{' '}
+              {duration(now - (row.waitingSince ?? now))}
+            </Text>
+          )
+        }
+        if (phase === 'quiet') {
+          return (
+            <Text color={PHASES.quiet.color}>
+              {PHASES.quiet.glyph} Radio silence · {duration(now - (row.lastActivityAt ?? row.startedAt))}
+              {loop}
+            </Text>
+          )
+        }
         return (
           <Text color={colorOf(row.type)}>
-            {spin} {verbOf(row.tool, row.id)}…
+            {spin} {verbOf(row.tool, row.id)}…{loop}
           </Text>
         )
       }
@@ -650,7 +796,13 @@ export const register: Register = on => {
                       <Text color={colorOf(row.type)} bold dimColor={!isLive}>
                         {row.name ?? row.type}
                       </Text>{' '}
-                      {isLive ? (
+                      {isLive && phaseOf(row, now) === 'waiting' ? (
+                        <Text color={PHASES.waiting.color} bold>
+                          {PHASES.waiting.glyph} Needs you{row.waitingTool ? `: ${row.waitingTool}?` : ''}
+                        </Text>
+                      ) : isLive && phaseOf(row, now) === 'quiet' ? (
+                        <Text color={PHASES.quiet.color}>{PHASES.quiet.glyph} Radio silence</Text>
+                      ) : isLive ? (
                         <Text color={colorOf(row.type)}>
                           {spin} {verbOf(row.tool, row.id)}…
                         </Text>
@@ -664,7 +816,10 @@ export const register: Register = on => {
                     </Text>
                   </Box>
                   <Box flexShrink={0} marginLeft={1}>
-                    <Text dimColor>{duration((row.endedAt ?? (isLive ? now : snap.updatedAt)) - row.startedAt)}</Text>
+                    <Text dimColor>
+                      {duration((row.endedAt ?? (isLive ? now : snap.updatedAt)) - row.startedAt)}
+                      {row.tokens ? ` · ${compactCount(row.tokens)} tok` : ''}
+                    </Text>
                   </Box>
                 </Box>
                 {indented(`${lead}${stem}   `, row.task, 'truncate-end')}
@@ -705,6 +860,7 @@ export const register: Register = on => {
         <Text dimColor wrap="wrap">
           {topLevel} agents · {subLevel} sub-agents · {childSessions.length} sessions · {running + runningSessions} busy ·{' '}
           {duration(now - opStart)}
+          {mainNow && usageOf(mainNow)}
         </Text>
       </Box>
     )
@@ -747,7 +903,10 @@ export const register: Register = on => {
           color: colorOf(k.type),
         })),
       ].sort((a, b) => a.at - b.at)
-      const timelineRoom = Math.max(4, lines - 18)
+      const diary = collapseRepeats(timeline)
+      const timelineRoom = Math.max(4, lines - 20)
+      const sums = totals.get(focused.id)
+      const model = shortModel(focused.model)
 
       return (
         <Box flexDirection="column" width="100%">
@@ -790,18 +949,33 @@ export const register: Register = on => {
               <Text dimColor> {focused.toolCount} tools</Text>
             </Text>,
           )}
+          {(focused.tokens ?? 0) > 0 &&
+            indented(
+              'Rations      ',
+              <Text>
+                {compactCount(focused.tokens ?? 0)} tokens
+                {sums && sums.agents > 0 && (
+                  <Text dimColor>
+                    {' '}
+                    · Σ {compactCount(sums.tokens)} with {sums.agents} under it
+                  </Text>
+                )}
+                {model && <Text dimColor> · {model}</Text>}
+              </Text>,
+            )}
           {focused.skills.length > 0 &&
             indented('Skills       ', <Text color="magenta">🎒 {focused.skills.join(' · ')}</Text>)}
           <Box marginTop={1}>
             <Text bold>⏱ War diary</Text>
           </Box>
-          {timeline.length === 0 && <Text dimColor>No dispatches yet.</Text>}
-          {timeline.length > timelineRoom && <Text dimColor>⋮ {timeline.length - timelineRoom} earlier entries</Text>}
-          {timeline.slice(-timelineRoom).map(item =>
+          {diary.length === 0 && <Text dimColor>No dispatches yet.</Text>}
+          {diary.length > timelineRoom && <Text dimColor>⋮ {diary.length - timelineRoom} earlier entries</Text>}
+          {diary.slice(-timelineRoom).map(item =>
             indented(
               `${stamp(item.at)} `,
               <Text>
                 {item.icon} <Text color={item.color}>{item.what}</Text>
+                {item.count > 1 && <Text bold> ×{item.count}</Text>}
                 {item.detail && <Text dimColor> {item.detail}</Text>}
               </Text>,
               'truncate-end',
@@ -851,9 +1025,41 @@ export const register: Register = on => {
       </Box>
     )
 
+    // Who waits on the person, longest wait first; a local agent opens on click.
+    const waits = waitsOf(rows, family, inside, now)
+    const needsYou = waits.length > 0 && (
+      <Box flexDirection="column" marginTop={1}>
+        <Text bold color={PHASES.waiting.color}>
+          📯 Needs you ({waits.length})
+        </Text>
+        {waits.slice(0, NEEDS_YOU_ROWS).map(w => (
+          <Box>
+            <Box flexGrow={1} flexShrink={1} minWidth={0}>
+              <Text color={PHASES.waiting.color}>{PHASES.waiting.glyph} </Text>
+              {w.agentId ? (
+                <Button key={`wait-${w.key}`} plain onPress={select(w.agentId)}>
+                  {w.who}
+                </Button>
+              ) : (
+                <Text wrap="truncate-end">{w.who}</Text>
+              )}
+              <Text wrap="truncate-end" dimColor>
+                {w.tool ? ` · may it use ${w.tool}?` : ''}
+              </Text>
+            </Box>
+            <Box flexShrink={0} marginLeft={1}>
+              <Text color={PHASES.waiting.color}>{duration(now - w.since)}</Text>
+            </Box>
+          </Box>
+        ))}
+        {waits.length > NEEDS_YOU_ROWS && <Text dimColor>⋮ {waits.length - NEEDS_YOU_ROWS} more waiting</Text>}
+      </Box>
+    )
+
     return (
       <Box flexDirection="column" width="100%">
         {header}
+        {needsYou}
         {tabs}
 
         {view === 'done' && (
@@ -883,6 +1089,7 @@ export const register: Register = on => {
                     <Box flexShrink={0} marginLeft={1}>
                       <Text dimColor>
                         {stamp(row.endedAt ?? row.startedAt)} · {duration((row.endedAt ?? now) - row.startedAt)}
+                        {usageOf(row)}
                       </Text>
                     </Box>
                   </Box>
@@ -939,7 +1146,10 @@ export const register: Register = on => {
                       <Text wrap="truncate-end"> {statusText(row)}</Text>
                     </Box>
                     <Box flexShrink={0} marginLeft={1}>
-                      <Text dimColor>{duration((row.endedAt ?? now) - row.startedAt)}</Text>
+                      <Text dimColor>
+                        {duration((row.endedAt ?? now) - row.startedAt)}
+                        {usageOf(row)}
+                      </Text>
                     </Box>
                   </Box>
                   {isSub && indented(lead, <Text color="magenta">↳ sent by {badgeOf(row.parentId)}</Text>)}
@@ -1037,7 +1247,9 @@ export const register: Register = on => {
 
         <Box marginTop={1}>
           <Text dimColor wrap="wrap">
-            AGENT = sent by the War Room · SUB-AGENT = sent by another agent · 🎒 = skills · click a name for details
+            AGENT = sent by the War Room · SUB-AGENT = sent by another agent · 🎒 = skills · {PHASES.working.glyph} on the
+            move · {PHASES.waiting.glyph} needs you · {PHASES.quiet.glyph} radio silence ({SILENCE_MS / 60_000}+ min quiet) · Σ =
+            with the agents under it · click a name for details
           </Text>
         </Box>
       </Box>

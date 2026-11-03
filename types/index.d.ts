@@ -15,6 +15,15 @@ export type AgentRow = {
   tool?: string
   toolCount: number
   toolTimes: number[]
+  // Tokens its model steps used (input, cache and output), and its model.
+  tokens?: number
+  model?: string
+  // Since when a permission question waits; how many tools run right now;
+  // its last step or tool.
+  waitingSince?: number
+  waitingTool?: string
+  inFlight?: number
+  lastActivityAt?: number
 }
 
 export type Handover = {
@@ -48,6 +57,9 @@ export type SessionSnapshot = {
   updatedAt: number
   isMainBusy: boolean
   mainTool?: string
+  // Since when the session's own loop waits for a permission answer.
+  mainWaitingSince?: number
+  mainWaitingTool?: string
   agents: AgentRow[]
   skills: { at: number; agentId: string; name: string }[]
 }

@@ -1,5 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
+import { collapseRepeats, compactCount, isLooping, phaseOf, subtreeTotals } from '../hooks/signals'
+
+// The test runtime has timers; the mod's type set leaves them out.
+declare const setTimeout: (run: () => void, ms: number) => unknown
+
 const PANE = {
   plugin: 'agent-monitor',
   component: 'Pane',
@@ -20,13 +25,13 @@ const SURFACES = ['terminal', 'desktop'] as const
 type TestBody = Extract<Parameters<typeof test>[1], (...args: never[]) => unknown>
 type On = Parameters<TestBody>[1]
 
-const engine = (on: On) => {
+const engine = (on: On, decision: 'allow' | 'deny' | 'ask' = 'deny') => {
   on('clock.every', () => ({ value: undefined }))
   on('command.register', () => ({ value: { command: 'agent-monitor' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('tool.call', () => ({ result: {} }))
-  on('tool.check', () => ({ decision: 'deny' as const }))
+  on('tool.check', () => ({ decision }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
   on('agent.spawn', (_, e) => ({ model: 'haiku', agentId: e.parentAgentId ? 'a2' : 'a1' }))
@@ -230,4 +235,86 @@ test('a session another one started opens no pane of its own', async ($, on) => 
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await $.tool.call({ tool: 'Read', file_path: 'x' })
   expect(opened).toBe(0)
+})
+
+test('an agent waiting for permission shows under Needs you until the call goes on', async ($, on) => {
+  engine(on, 'ask')
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.agent.spawn({ prompt: 'Run the tests', description: 'Run tests', subagentType: 'tdd-guide' } as never)
+  await $.tool.check({ tool: 'Bash', input: { command: 'npm test' }, tool_use_id: 'u1', agentId: 'a1' } as never)
+  // A question settled within a moment is not shown: wait past the grace.
+  await new Promise<void>(resolve => setTimeout(() => resolve(), 3_200))
+
+  let ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /Needs you \(1\)/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /may it use Bash/ })).toBeDefined()
+  await ui.unmount()
+
+  await $.tool.call({ tool: 'Bash', command: 'npm test', agentId: 'a1' })
+  ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /Needs you \(/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test("tokens show per agent and add up under its parent", async ($, on) => {
+  engine(on)
+  on('turn.step', async function* (_, e) {
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: '',
+      toolUses: [],
+      stopReason: 'end_turn' as const,
+      usage: { input_tokens: 1_000, output_tokens: 500, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: 'claude-haiku-5-5' },
+    }
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.agent.spawn({ prompt: 'Find auth', description: 'Find auth', subagentType: 'Explore' } as never)
+  await $.agent.spawn({ prompt: 'Dig deeper', description: 'Dig deeper', subagentType: 'Explore', parentAgentId: 'a1' } as never)
+  for (const agentId of ['a1', 'a2']) {
+    for await (const _ of $.turn.step({ turnId: `s-${agentId}`, index: 0, model: 'haiku', messageCount: 1, agentId })) {
+      // drain the stream
+    }
+  }
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /Σ 3\.0k tok/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /1\.5k tok/ })).toBeDefined()
+  await ui.press({ key: 'agent-a1' })
+  expect(await ui.find({ type: 'Text', text: /with 1 under it/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /haiku/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('signals: phases, loops, repeats and totals', async () => {
+  const now = 1_000_000
+  const base = { id: 'a', parentId: 'main', seq: 1, label: '#1', type: 'Explore', task: 't', status: 'running' as const, startedAt: now - 200_000, skills: [], toolCount: 2, toolTimes: [] }
+  expect(phaseOf({ ...base, lastActivityAt: now - 100_000 }, now)).toBe('quiet')
+  expect(phaseOf({ ...base, lastActivityAt: now - 100_000, inFlight: 1 }, now)).toBe('working')
+  expect(phaseOf({ ...base, lastActivityAt: now, waitingSince: now - 1_000 }, now)).toBe('working')
+  expect(phaseOf({ ...base, lastActivityAt: now, waitingSince: now - 5_000 }, now)).toBe('waiting')
+  expect(phaseOf({ ...base, status: 'error' }, now)).toBe('failed')
+
+  const read = { name: 'Read', detail: 'a.ts' }
+  expect(isLooping([read, read, read, read])).toBe(true)
+  expect(isLooping([read, read, { name: 'Read', detail: 'b.ts' }, read])).toBe(false)
+
+  const merged = collapseRepeats([
+    { what: 'Read', at: 1 },
+    { what: 'Read', at: 2 },
+    { what: 'Edit', at: 3 },
+  ])
+  expect(merged.map(m => `${m.what}×${m.count}`).join(' ')).toBe('Read×2 Edit×1')
+
+  const sums = subtreeTotals([
+    { ...base, id: 'main', parentId: '', tokens: 10 },
+    { ...base, id: 'a1', parentId: 'main', tokens: 100 },
+    { ...base, id: 'a2', parentId: 'a1', tokens: 1_000 },
+  ])
+  expect(sums.get('main')?.tokens).toBe(1_110)
+  expect(sums.get('a1')?.agents).toBe(1)
+  expect(compactCount(12_345)).toBe('12k')
+  expect(compactCount(1_500)).toBe('1.5k')
 })
