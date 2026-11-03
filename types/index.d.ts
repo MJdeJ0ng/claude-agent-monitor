@@ -13,6 +13,8 @@ export type AgentRow = {
   endedAt?: number
   skills: string[]
   tool?: string
+  // What the current tool call is about: a command, file or query.
+  toolDetail?: string
   toolCount: number
   toolTimes: number[]
   // Tokens its model steps used (input, cache and output), and its model.
@@ -24,7 +26,17 @@ export type AgentRow = {
   waitingTool?: string
   inFlight?: number
   lastActivityAt?: number
+  // Files it wrote or edited, newest last.
+  files?: string[]
+  // The engine's own word for its loop while it runs (idle, waiting, ...),
+  // and whether the pane met it through its steps rather than its spawn.
+  engineStatus?: string
+  isAdopted?: boolean
 }
+
+// A finished agent kept across restarts: its row, its report, and the folder
+// its session worked in (the pane shows the ones from its own folder).
+export type ArchivedAgent = AgentRow & { report?: string; folder: string }
 
 export type Handover = {
   at: number
@@ -42,6 +54,7 @@ export type SessionRow = {
   name?: string
   startedBy?: string
   cwd?: string
+  isArchived?: boolean
   isRunning: boolean
   prNumber?: number
   prState?: string
@@ -57,9 +70,14 @@ export type SessionSnapshot = {
   updatedAt: number
   isMainBusy: boolean
   mainTool?: string
+  mainToolDetail?: string
   // Since when the session's own loop waits for a permission answer.
   mainWaitingSince?: number
   mainWaitingTool?: string
+  // Tokens the session's own loop used, and the latest handovers between
+  // its agents (briefs, messages, reports).
+  mainTokens?: number
+  handovers?: Handover[]
   agents: AgentRow[]
   skills: { at: number; agentId: string; name: string }[]
 }
@@ -84,6 +102,11 @@ declare module 'claude-code' {
       filter: Shaped<ViewFilter>
       mainBusy: Shaped<boolean>
       tick: Shaped<number>
+      plain: Shaped<boolean>
+      expanded: Shaped<string[]>
+      archive: Shaped<ArchivedAgent[]>
+      confirmStop: Shaped<string>
+      sent: Shaped<number>
     }
   }
 }

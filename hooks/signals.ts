@@ -1,4 +1,4 @@
-import type { AgentRow } from '../types'
+import type { AgentRow, SessionRow, SessionSnapshot } from '../types'
 
 // What the pane reads off an agent beyond its raw events: which of four live
 // states it is in, how much it and the agents under it used, and whether it
@@ -25,6 +25,8 @@ export const phaseOf = (row: AgentRow, now: number): Phase => {
   if (row.status === 'error' || row.status === 'denied') return 'failed'
   if (row.status !== 'running') return 'ended'
   if (row.waitingSince !== undefined && now - row.waitingSince >= NEEDS_YOU_GRACE_MS) return 'waiting'
+  // A teammate waiting for a message: idle by the engine's own word.
+  if (row.engineStatus === 'idle') return 'quiet'
   const isToolRunning = (row.inFlight ?? 0) > 0
   if (!isToolRunning && now - (row.lastActivityAt ?? row.startedAt) >= SILENCE_MS) return 'quiet'
   return 'working'
@@ -77,6 +79,66 @@ export const collapseRepeats = <T extends { what: string; detail?: string; at: n
     }
     return [...acc, { ...item, count: 1 }]
   }, [])
+
+// Whether a child session is at work: the app says so only while its own
+// turn runs, but agents it sent off in the background keep working after
+// that, and its snapshot shows them.
+export const isSessionBusy = (session: SessionRow, snap: SessionSnapshot | undefined): boolean =>
+  session.isRunning || (!session.isArchived && !!snap && (snap.isMainBusy || snap.agents.some(a => a.status === 'running')))
+
+// The agents still at work, and the agents above them for context: what a
+// Live view shows. Finished agents with nothing working under them are left
+// for the Done view.
+export const liveWithContext = (rows: AgentRow[]): AgentRow[] => {
+  const ids = new Set<string>()
+  for (const r of rows.filter(x => x.status === 'running')) {
+    let cur: AgentRow | undefined = r
+    while (cur && !ids.has(cur.id)) {
+      ids.add(cur.id)
+      const parentId: string = cur.parentId
+      cur = rows.find(x => x.id === parentId)
+    }
+  }
+  return rows.filter(r => ids.has(r.id))
+}
+
+// The sessions this one started, and the ones they started in turn. The
+// app's linked list is the whole family (the starter and the siblings too);
+// without its own id a session takes everyone with a starter.
+export const ownSessions = (family: SessionRow[], selfId: string | undefined): SessionRow[] => {
+  if (!selfId) return family.filter(s => s.startedBy !== undefined)
+  const mine = new Set<string>([selfId])
+  let isGrowing = true
+  while (isGrowing) {
+    isGrowing = false
+    for (const s of family) {
+      if (s.startedBy && mine.has(s.startedBy) && !mine.has(s.id)) {
+        mine.add(s.id)
+        isGrowing = true
+      }
+    }
+  }
+  return family.filter(s => s.id !== selfId && mine.has(s.id))
+}
+
+// A report's first sentence (or line), for a row that has room for one.
+export const firstSentence = (text: string): string => {
+  const line = text.trim().split(/\n/)[0] ?? ''
+  const end = /[.!?](\s|$)/.exec(line)
+  return (end ? line.slice(0, end.index + 1) : line).replace(/^[#>*\-\s]+/, '').trim()
+}
+
+// The files an agent shares with another agent at work: name → the others.
+export const sharedFiles = (row: AgentRow, rows: AgentRow[]): Map<string, AgentRow[]> => {
+  const others = rows.filter(r => r.id !== row.id && r.parentId !== '' && r.status === 'running')
+  return new Map(
+    (row.files ?? [])
+      .map(f => [f, others.filter(o => o.files?.includes(f))] as const)
+      .filter(([, who]) => who.length > 0),
+  )
+}
+
+export const baseName = (path: string): string => path.replace(/\\/g, '/').split('/').pop() ?? path
 
 // Whether an agent's latest tool calls are one call made over and over.
 export const isLooping = (calls: { name: string; detail?: string }[]): boolean => {

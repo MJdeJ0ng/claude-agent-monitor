@@ -1,6 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { SessionSnapshot } from '../types'
+import { normalizeRow } from './roster'
 
 // How sessions see into each other: each session writes what it is doing to
 // one file in a folder they all share, named by its app session id; the
@@ -63,6 +64,23 @@ const isSnapshot = (value: unknown): value is SessionSnapshot => {
   return typeof v?.id === 'string' && typeof v.updatedAt === 'number' && Array.isArray(v.agents) && Array.isArray(v.skills)
 }
 
+// A snapshot another version of the mod wrote, with every row and skill made
+// whole, so a field it lacks never breaks the pane that draws it.
+const wholeSnapshot = (snap: SessionSnapshot): SessionSnapshot => ({
+  ...snap,
+  isMainBusy: snap.isMainBusy === true,
+  agents: snap.agents.map(normalizeRow).filter(row => row !== undefined),
+  handovers: Array.isArray(snap.handovers)
+    ? snap.handovers.filter(
+        h => typeof h?.from === 'string' && typeof h.to === 'string' && typeof h.text === 'string' && typeof h.at === 'number',
+      )
+    : [],
+  skills: snap.skills.filter(
+    (k): k is SessionSnapshot['skills'][number] =>
+      typeof k?.name === 'string' && typeof k.agentId === 'string' && typeof k.at === 'number',
+  ),
+})
+
 // Reads the snapshots of the given sessions; a session with no file yet (no
 // mod there, or nothing shared) is left out.
 export async function readSnapshots($: EngineInterface, ids: string[]): Promise<Record<string, SessionSnapshot>> {
@@ -71,7 +89,7 @@ export async function readSnapshots($: EngineInterface, ids: string[]): Promise<
     ids.map(async id => {
       try {
         const parsed: unknown = JSON.parse(String(await $.fs.read(`${dir}/${id}.json`)))
-        return isSnapshot(parsed) ? ([id, parsed] as const) : undefined
+        return isSnapshot(parsed) ? ([id, wholeSnapshot(parsed)] as const) : undefined
       } catch {
         return undefined
       }
