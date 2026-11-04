@@ -39,7 +39,6 @@ export const MAX_FILES = 30
 export const REPORT_CHARS = 2_000
 export const HISTORY_KEY = 'history'
 export const PLAIN_KEY = 'plain'
-export const LAYOUT_KEY = 'layout'
 export const MAX_HISTORY = 80
 export const ARCHIVE_ROWS = 8
 export const DONE_SESSION_ROWS = 10
@@ -67,7 +66,6 @@ export const SHAPES = {
   tick: 'tick-1',
   confirmStop: 'confirmStop-1',
   sent: 'sent-1',
-  layout: 'layout-1',
 } as const
 
 export const live = {

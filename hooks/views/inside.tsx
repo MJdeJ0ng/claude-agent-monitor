@@ -1,5 +1,5 @@
 import type { Handover, SessionRow } from '../../types'
-import { avatarOf, clip, colorOf, duration, flattenTree, mainRow, nowText } from '../format'
+import { avatarOf, clip, colorOf, duration, flattenTree, mainRow } from '../format'
 import { PHASES, compactCount, isSessionBusy, liveWithContext, phaseOf } from '../signals'
 import { MAIN, REMOTE_ROWS } from '../state'
 import { verbOf } from '../wording'
@@ -37,7 +37,7 @@ export const insideOf = (c: Ctx, p: Parts, s: SessionRow, lead: string, isFull =
         indented(
           lead,
           <Text color="yellow">
-            {spin} {verbOf(w, snap.mainTool, s.id)}…{snap.mainTool ? ` · now: ${nowText(snap.mainTool, snap.mainToolDetail)}` : ''}
+            {spin} {verbOf(w, snap.mainTool, s.id)}…{snap.mainTool ? ` · now: ${c.stepOf(snap.mainTool, snap.mainToolDetail)}` : ''}
           </Text>,
           'truncate-end',
         )}
@@ -94,7 +94,7 @@ export const insideOf = (c: Ctx, p: Parts, s: SessionRow, lead: string, isFull =
             {indented(`${lead}${stem}   `, row.task, 'truncate-end')}
             {isLive &&
               row.tool &&
-              indented(`${lead}${stem}   `, <Text dimColor>now: {nowText(row.tool, row.toolDetail)}</Text>, 'truncate-end')}
+              indented(`${lead}${stem}   `, <Text dimColor>now: {c.stepOf(row.tool, row.toolDetail)}</Text>, 'truncate-end')}
             {row.skills.length > 0 &&
               indented(`${lead}${stem}   `, <Text color="magenta">🎒 {row.skills.join(' · ')}</Text>, 'truncate-end')}
             {isFull && filesLine(row, `${lead}${stem}   `, snap.agents)}

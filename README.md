@@ -2,7 +2,6 @@
 
 A live pane inside Claude Code that shows which agents and sub-agents are running, the task each was given, the skills each has used, and the handovers between them: task briefs going down, messages sideways, reports coming back.
 
-- **◇ UI view / ▤ CLI view**: in the desktop app, Live is drawn as a live flowchart, left to right: the War Room, its agents and sub-agents, and each child session as a lane with its own agents at work. Lines into live work move, nodes at work pulse, ◐ needs-you nodes pulse faster; hover a box for its task and current step, and use the buttons under it to open one. One button switches to the text view and back; the choice is remembered. A terminal pane always shows the text view.
 - **● Live / ✓ Done tabs**: the live tree shows only agents at work (with the agents above them for context); Done is the history of finished agents, newest first.
 - **AGENT / SUB-AGENT labels**: AGENT = started by the main session, SUB-AGENT = started by another agent.
 - **📯 Needs you**: agents and child sessions waiting for your permission answer sit at the top, longest wait first, with one short bugle call and a toast when a wait starts (the main session's own question is already in front of you, so it is left out).

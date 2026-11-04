@@ -1,5 +1,5 @@
 import type { AgentRow, SessionRow } from '../../types'
-import { colorOf, duration, nowText, sparkline } from '../format'
+import { colorOf, duration, sparkline } from '../format'
 import { PHASES, baseName, compactCount, firstSentence, isLooping, isSessionBusy, phaseOf, sharedFiles } from '../signals'
 import { MAIN, PARTY_MS } from '../state'
 import { pick, verbOf } from '../wording'
@@ -169,7 +169,7 @@ export const partsOf = (c: Ctx) => {
           <Text color="cyan">{sparkline(mainNow.toolTimes ?? [], now)}</Text>
           <Text dimColor>
             {'  '}
-            {mainNow.toolCount} tools{mainNow.tool ? ` · now: ${nowText(mainNow.tool, mainNow.toolDetail)}` : ''}
+            {mainNow.toolCount} tools{mainNow.tool ? ` · now: ${c.stepOf(mainNow.tool, mainNow.toolDetail)}` : ''}
           </Text>
         </Text>
       )}

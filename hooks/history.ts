@@ -1,18 +1,15 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { ArchivedAgent, LayoutMode } from '../types'
+import type { ArchivedAgent } from '../types'
 import { folderKey } from './share'
-import { HISTORY_KEY, LAYOUT_KEY, MAX_HISTORY, PLAIN_KEY, SHAPES, live } from './state'
+import { HISTORY_KEY, MAX_HISTORY, PLAIN_KEY, SHAPES, live } from './state'
 
 // What the pane keeps in the plugin's store: the agents that finished, and
 // the wording the person picked.
 
 const plain = atom({ plugin: 'agent-monitor', key: 'plain' } as const, false, {
   shape: SHAPES.plain,
-})
-const layout = atom({ plugin: 'agent-monitor', key: 'layout' } as const, '' as LayoutMode, {
-  shape: SHAPES.layout,
 })
 const archive = atom({ plugin: 'agent-monitor', key: 'archive' } as const, [] as ArchivedAgent[], {
   shape: SHAPES.archive,
@@ -68,22 +65,3 @@ export async function togglePlain($: EngineInterface): Promise<void> {
   }
 }
 
-// The person's choice between the text and the flowchart Live view, kept
-// like the wording choice.
-export async function loadLayout($: EngineInterface): Promise<void> {
-  try {
-    const stored = await $.store.get(LAYOUT_KEY)
-    if (stored === 'cli' || stored === 'ui') await update($, layout, () => stored)
-  } catch {
-    // Keep each surface's default.
-  }
-}
-
-export async function setLayout($: EngineInterface, next: LayoutMode): Promise<void> {
-  await update($, layout, () => next)
-  try {
-    await $.store.set(LAYOUT_KEY, next)
-  } catch {
-    // The choice holds for this session only.
-  }
-}

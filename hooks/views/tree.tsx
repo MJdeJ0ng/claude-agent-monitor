@@ -1,11 +1,10 @@
 import type { AgentRow } from '../../types'
-import { ago, avatarOf, colorOf, duration, flattenTree, nowText, sparkline } from '../format'
+import { ago, avatarOf, colorOf, duration, flattenTree, sparkline } from '../format'
 import { PHASES, SILENCE_MS } from '../signals'
 import { DONE_SESSION_ROWS, LINES_PER_AGENT, MAIN, NEEDS_YOU_ROWS, PARTY_MS, SESSION_FOCUS, SKILL_ROWS } from '../state'
 import { waitsOf } from '../waits'
 import type { Ctx } from './context'
 import { doneList } from './done'
-import { flowView } from './flow'
 import { insideOf } from './inside'
 import type { Parts } from './parts'
 
@@ -40,8 +39,6 @@ export const treeView = (c: Ctx, p: Parts) => {
   const room = Math.max(1, Math.floor((lines - 10 - skillRoom) / LINES_PER_AGENT))
   const visible = nodes.slice(-room)
   const historyRoom = Math.max(1, Math.floor((lines - 11 - skillRoom) / 4))
-  // Live as a flowchart where the surface draws one and the person wants it.
-  const isFlow = view === 'live' && c.isFlowView
   const tabs = (
     <Box gap={2} marginTop={1} flexWrap="wrap">
       <Button key="tab-live" variant={view === 'live' ? 'primary' : 'secondary'} onPress={setView('live')}>
@@ -50,11 +47,6 @@ export const treeView = (c: Ctx, p: Parts) => {
       <Button key="tab-done" variant={view === 'done' ? 'primary' : 'secondary'} onPress={setView('done')}>
         ✓ Done ({finished.length + childSessions.length - openSessions})
       </Button>
-      {c.canDraw && (
-        <Button key="layout" variant="secondary" onPress={c.switchLayout}>
-          {c.isFlowView ? '▤ CLI view' : '◇ UI view'}
-        </Button>
-      )}
     </Box>
   )
 
@@ -67,8 +59,11 @@ export const treeView = (c: Ctx, p: Parts) => {
       </Text>
       {waits.slice(0, NEEDS_YOU_ROWS).map(w => (
         <Box>
-          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <Box flexShrink={0}>
             <Text color={PHASES.waiting.color}>{PHASES.waiting.glyph} </Text>
+          </Box>
+          {/* Who gives way; the short question and the time keep theirs. */}
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
             {w.agentId ? (
               <Button key={`wait-${w.key}`} plain onPress={select(w.agentId)}>
                 {w.who}
@@ -76,10 +71,12 @@ export const treeView = (c: Ctx, p: Parts) => {
             ) : (
               <Text wrap="truncate-end">{w.who}</Text>
             )}
-            <Text wrap="truncate-end" dimColor>
-              {w.tool ? ` · may it use ${w.tool}?` : ''}
-            </Text>
           </Box>
+          {w.tool && (
+            <Box flexShrink={0}>
+              <Text dimColor> · may it use {w.tool}?</Text>
+            </Box>
+          )}
           <Box flexShrink={0} marginLeft={1}>
             <Text color={PHASES.waiting.color}>{duration(now - w.since)}</Text>
           </Box>
@@ -96,14 +93,8 @@ export const treeView = (c: Ctx, p: Parts) => {
       {tabs}
 
       {view === 'done' && doneList(c, p, finished, historyRoom)}
-      {isFlow &&
-        flowView(
-          c,
-          rows.filter(r => r.id !== MAIN && liveIds.has(r.id)),
-          shownSessions,
-        )}
 
-      {view === 'live' && !isFlow && nodes.length === 0 && openSessions === 0 && (
+      {view === 'live' && nodes.length === 0 && openSessions === 0 && (
         <Box flexDirection="column">
           <Text dimColor>│</Text>
           {indented(
@@ -116,7 +107,7 @@ export const treeView = (c: Ctx, p: Parts) => {
           )}
         </Box>
       )}
-      {view === 'live' && !isFlow && (
+      {view === 'live' && (
         <Box flexDirection="column">
           {nodes.length > room && <Text dimColor>│  ⋮ {nodes.length - room} earlier agents folded</Text>}
 
@@ -137,13 +128,16 @@ export const treeView = (c: Ctx, p: Parts) => {
                     {levelBadge(isSub)}
                     <Text> </Text>
                   </Box>
-                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                  {/* The name keeps its width; the status beside it gives way. */}
+                  <Box flexShrink={0}>
                     <Button key={`agent-${row.id}`} plain onPress={select(row.id)}>
                       {avatarOf(row.type)}{' '}
                       <Text color={accent} bold dimColor={!isRunning && !isParty}>
                         {row.name ?? row.type}
                       </Text>
                     </Button>
+                  </Box>
+                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
                     <Text wrap="truncate-end"> {statusText(row)}</Text>
                   </Box>
                   <Box flexShrink={0} marginLeft={1}>
@@ -163,7 +157,7 @@ export const treeView = (c: Ctx, p: Parts) => {
                     </Text>
                     <Text dimColor>
                       {'  '}
-                      {row.toolCount} tools{isRunning && row.tool ? ` · now: ${nowText(row.tool, row.toolDetail)}` : ''}
+                      {row.toolCount} tools{isRunning && row.tool ? ` · now: ${c.stepOf(row.tool, row.toolDetail)}` : ''}
                     </Text>
                   </Text>,
                 )}
@@ -184,7 +178,7 @@ export const treeView = (c: Ctx, p: Parts) => {
         </Box>
       )}
 
-      {shownSessions.length > 0 && !isFlow && (
+      {shownSessions.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
           <Text bold>{view === 'live' ? w.sessionsLive : w.sessionsDone}</Text>
           {shownSessions.map(s => {
@@ -201,16 +195,19 @@ export const treeView = (c: Ctx, p: Parts) => {
                     </Text>
                     <Text> </Text>
                   </Box>
+                  {/* A long title gives way; nothing shares its line, since a
+                      text beside a button that took the width breaks letter by
+                      letter in the desktop pane. */}
                   <Box flexGrow={1} flexShrink={1} minWidth={0}>
                     <Button key={`session-${s.id}`} plain onPress={select(`${SESSION_FOCUS}${s.id}`)}>
                       🪟 <Text bold>{s.title}</Text>
                     </Button>
-                    <Text wrap="truncate-end"> {sessionState(s)}</Text>
                   </Box>
                   <Box flexShrink={0} marginLeft={1}>
                     <Text dimColor>{ago(now - s.lastActivityAt)}</Text>
                   </Box>
                 </Box>
+                {indented(`${lead}   `, sessionState(s), 'truncate-end')}
                 {indented(
                   `${lead}   `,
                   <Text dimColor>
