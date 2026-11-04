@@ -1,6 +1,6 @@
 import type { AgentRow, SessionRow } from '../../types'
 import { colorOf, duration, sparkline } from '../format'
-import { PHASES, baseName, compactCount, firstSentence, isLooping, isSessionBusy, phaseOf, sharedFiles } from '../signals'
+import { PHASES, baseName, compactCount, firstSentence, isLooping, isSessionBusy, modelTag, phaseOf, sharedFiles } from '../signals'
 import { MAIN, PARTY_MS } from '../state'
 import { pick, verbOf } from '../wording'
 import type { Ctx } from './context'
@@ -43,11 +43,12 @@ export const partsOf = (c: Ctx) => {
     </Text>
   )
 
-  // Tokens on a row: its own, or Σ with every agent under it when it has some.
+  // Tokens on a row (its own, or Σ with every agent under it when it has
+  // some), and the model it runs on.
   const usageOf = (row: AgentRow): string => {
     const t = totals.get(row.id)
-    if (!t || t.tokens === 0) return ''
-    return t.agents > 0 ? ` · Σ ${compactCount(t.tokens)} tok` : ` · ${compactCount(t.tokens)} tok`
+    const tokens = !t || t.tokens === 0 ? '' : t.agents > 0 ? ` · Σ ${compactCount(t.tokens)} tok` : ` · ${compactCount(t.tokens)} tok`
+    return `${tokens}${modelTag(row.model)}`
   }
 
   // A report as one sentence, opened in full on request.
@@ -135,7 +136,14 @@ export const partsOf = (c: Ctx) => {
   }
 
   // A child session's state in a few words: at work, waiting, or done.
-  const sessionState = (s: SessionRow) =>
+  // A child session's state, and the model its own loop runs on.
+  const sessionState = (s: SessionRow) => (
+    <Text>
+      {sessionPhase(s)}
+      <Text dimColor>{modelTag(inside[s.id]?.mainModel)}</Text>
+    </Text>
+  )
+  const sessionPhase = (s: SessionRow) =>
     isSessionBusy(s, inside[s.id]) ? (
       <Text color="yellow">
         {spin} {w.sessionWorking}…

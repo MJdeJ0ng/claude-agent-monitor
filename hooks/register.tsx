@@ -108,6 +108,7 @@ export const register: Register = on => {
         description: e.description,
         prompt: e.prompt,
         isDenied: Boolean(res.deny),
+        model: res.model,
       }),
     )
     return res

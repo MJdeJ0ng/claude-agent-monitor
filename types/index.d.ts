@@ -77,6 +77,7 @@ export type SessionSnapshot = {
   // Tokens the session's own loop used, and the latest handovers between
   // its agents (briefs, messages, reports).
   mainTokens?: number
+  mainModel?: string
   handovers?: Handover[]
   agents: AgentRow[]
   skills: { at: number; agentId: string; name: string }[]

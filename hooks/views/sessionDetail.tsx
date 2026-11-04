@@ -1,6 +1,6 @@
 import type { SessionRow } from '../../types'
 import { ago, avatarOf, clip } from '../format'
-import { compactCount } from '../signals'
+import { compactCount, modelTag } from '../signals'
 import { MAIN, SKILL_ROWS } from '../state'
 import type { Ctx } from './context'
 import { insideOf } from './inside'
@@ -43,7 +43,14 @@ export const sessionDetail = (c: Ctx, p: Parts, s: SessionRow) => {
           {pr ? <Text dimColor> · {pr}</Text> : ''}
         </Text>,
       )}
-      {tokens > 0 && indented(`${w.rations.padEnd(13)}`, <Text>Σ {compactCount(tokens)} tokens</Text>)}
+      {(tokens > 0 || modelTag(snap?.mainModel)) &&
+        indented(
+          `${w.rations.padEnd(13)}`,
+          <Text>
+            {tokens > 0 ? `Σ ${compactCount(tokens)} tokens` : ''}
+            <Text dimColor>{tokens > 0 ? modelTag(snap?.mainModel) : modelTag(snap?.mainModel).slice(3)}</Text>
+          </Text>,
+        )}
       {s.isRunning && c.stopping !== s.id && (
         <Box marginTop={1}>
           <Button key={`stop-${s.id}`} variant="secondary" onPress={c.askStop(s.id)}>

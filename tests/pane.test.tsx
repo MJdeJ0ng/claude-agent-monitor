@@ -691,3 +691,33 @@ test("a message's address shows as the session's title, not its id", async ($, o
   expect(await ui.find({ type: 'Text', text: /local_cc7d0b66/ })).toBeUndefined()
   await ui.unmount()
 })
+
+test('the model shows for an agent and for a child session', async ($, on) => {
+  const snapshot = { id: 'local_1', updatedAt: Date.now(), isMainBusy: true, mainModel: 'claude-sonnet-5-5', agents: [], skills: [] }
+  on('clock.every', () => ({ value: undefined }))
+  on('command.register', () => ({ value: { command: 'agent-monitor' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'a1' }))
+  on('tool.check', () => ({ decision: 'allow' as const }))
+  on('fs.read', () => ({ value: JSON.stringify(snapshot) }))
+  on('tool.call', (_, e) =>
+    e.tool === 'mcp__ccd_session_mgmt__list_sessions'
+      ? {
+          result: {},
+          text: JSON.stringify([
+            { sessionId: 'local_1', title: 'Build #100', isRunning: true, isArchived: false, lastActivityAt: new Date().toISOString(), startedBy: 'local_me' },
+          ]),
+        }
+      : { result: {}, text: '{}' },
+  )
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.agent.spawn({ prompt: 'Find auth', description: 'Find auth', subagentType: 'Explore' } as never)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /00:0\d · haiku/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /On manoeuvres… · sonnet/ })).toBeDefined()
+  await ui.unmount()
+})

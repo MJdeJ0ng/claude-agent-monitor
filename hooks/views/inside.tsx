@@ -1,6 +1,6 @@
 import type { Handover, SessionRow } from '../../types'
 import { avatarOf, clip, colorOf, duration, flattenTree, mainRow } from '../format'
-import { PHASES, compactCount, isSessionBusy, liveWithContext, phaseOf } from '../signals'
+import { PHASES, compactCount, isSessionBusy, liveWithContext, modelTag, phaseOf } from '../signals'
 import { MAIN, REMOTE_ROWS } from '../state'
 import { verbOf } from '../wording'
 import type { Ctx } from './context'
@@ -88,6 +88,7 @@ export const insideOf = (c: Ctx, p: Parts, s: SessionRow, lead: string, isFull =
                 <Text dimColor>
                   {duration((row.endedAt ?? (isLive ? now : snap.updatedAt)) - row.startedAt)}
                   {row.tokens ? ` · ${compactCount(row.tokens)} tok` : ''}
+                  {modelTag(row.model)}
                 </Text>
               </Box>
             </Box>

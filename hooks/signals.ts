@@ -67,6 +67,12 @@ export const compactCount = (n: number): string => {
 export const shortModel = (model: string | undefined): string | undefined =>
   model ? /(opus|sonnet|haiku|fable)/i.exec(model)?.[1]?.toLowerCase() ?? model : undefined
 
+// The model as a short tag after a row's figures: ' · haiku', or nothing.
+export const modelTag = (model: unknown): string => {
+  const short = typeof model === 'string' ? shortModel(model) : undefined
+  return short ? ` · ${short}` : ''
+}
+
 // Runs of the same entry merged into one with a count (Read ×7), keeping the
 // latest detail and time.
 export const collapseRepeats = <T extends { what: string; detail?: string; at: number }>(

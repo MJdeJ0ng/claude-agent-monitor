@@ -128,17 +128,16 @@ export const treeView = (c: Ctx, p: Parts) => {
                     {levelBadge(isSub)}
                     <Text> </Text>
                   </Box>
-                  {/* The name keeps its width; the status beside it gives way. */}
-                  <Box flexShrink={0}>
+                  {/* The name alone on its line, the status on the next: a text
+                      beside a button breaks letter by letter in the desktop
+                      pane once the button leaves it too little room. */}
+                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
                     <Button key={`agent-${row.id}`} plain onPress={select(row.id)}>
                       {avatarOf(row.type)}{' '}
                       <Text color={accent} bold dimColor={!isRunning && !isParty}>
                         {row.name ?? row.type}
                       </Text>
                     </Button>
-                  </Box>
-                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                    <Text wrap="truncate-end"> {statusText(row)}</Text>
                   </Box>
                   <Box flexShrink={0} marginLeft={1}>
                     <Text dimColor>
@@ -147,6 +146,7 @@ export const treeView = (c: Ctx, p: Parts) => {
                     </Text>
                   </Box>
                 </Box>
+                {indented(lead, statusText(row), 'truncate-end')}
                 {isSub && indented(lead, <Text color="magenta">↳ sent by {badgeOf(row.parentId)}</Text>)}
                 {indented(lead, row.task)}
                 {indented(

@@ -165,6 +165,7 @@ export async function shareSnapshot($: EngineInterface): Promise<void> {
     mainWaitingSince: main?.waitingSince,
     mainWaitingTool: main?.waitingTool,
     mainTokens: main?.tokens,
+    mainModel: main?.model,
     handovers: (await read($, handovers)).slice(-SHARED_HANDOVERS).map(h => ({ ...h, text: clip(h.text, SHARED_HANDOVER_CHARS) })),
     agents: rows
       .filter(r => r.id !== MAIN)

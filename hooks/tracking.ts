@@ -83,6 +83,8 @@ export type Spawn = {
   description: string
   prompt: string
   isDenied: boolean
+  // The model it resolved to, when the spawn says.
+  model?: string
 }
 
 // An agent is started: its row, and the task handed to it.
@@ -105,6 +107,7 @@ export async function recordSpawn($: EngineInterface, s: Spawn): Promise<void> {
       skills: before?.skills ?? [],
       toolCount: before?.toolCount ?? 0,
       toolTimes: before?.toolTimes ?? [],
+      model: before?.model ?? s.model,
       isAdopted: false,
     }
     return [...list.filter(r => r.id !== id), row].slice(-MAX_AGENTS)

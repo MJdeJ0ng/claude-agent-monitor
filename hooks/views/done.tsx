@@ -1,6 +1,6 @@
 import type { AgentRow, AgentStatus } from '../../types'
 import { ago, avatarOf, colorOf, duration } from '../format'
-import { compactCount } from '../signals'
+import { compactCount, modelTag } from '../signals'
 import { ARCHIVE_ROWS, MAIN } from '../state'
 import type { Ctx } from './context'
 import type { Parts } from './parts'
@@ -68,6 +68,7 @@ export const doneList = (c: Ctx, p: Parts, finished: AgentRow[], historyRoom: nu
                   <Text>
                     {ago(now - (a.endedAt ?? a.startedAt))}
                     {a.tokens ? ` · ${compactCount(a.tokens)} tok` : ''}
+                    {modelTag(a.model)}
                   </Text>,
                 )}
                 {a.report && reportLines(`old-${a.id}`, a.report, '   ')}

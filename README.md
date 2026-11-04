@@ -6,7 +6,7 @@ A live pane inside Claude Code that shows which agents and sub-agents are runnin
 - **AGENT / SUB-AGENT labels**: AGENT = started by the main session, SUB-AGENT = started by another agent.
 - **📯 Needs you**: agents and child sessions waiting for your permission answer sit at the top, longest wait first, with one short bugle call and a toast when a wait starts (the main session's own question is already in front of you, so it is left out).
 - **Four states**: ● on the move, ◐ needs you, ○ radio silence (no step or tool for 1.5 minutes while nothing runs), ✕ in trouble; 🔁 marks an agent repeating the same call.
-- **Tokens**: per agent, from each model step, with Σ adding up everything under an agent; the detail view also shows the model.
+- **Tokens and model**: per agent, from each model step, with Σ adding up everything under an agent; each agent and each child session shows the model it runs on (opus, sonnet, haiku, fable).
 - **Reports**: a finished agent shows the first sentence of its report; ▾ full report opens the rest, and the detail view shows it whole.
 - **✏️ Files**: the files each agent wrote or edited, with ⚠️ when another agent at work is editing the same file.
 - **📜 History**: finished agents are kept across restarts; the Done tab lists those from earlier sessions in the same folder.
