@@ -24,6 +24,7 @@ export type UiKit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 type StageLook = { label: string; short: string; glyph: string; color: string }
 
 export const STAGE_LOOK: Record<Stage, StageLook> = {
+  'coming-up': { label: 'Coming up', short: 'coming', glyph: '·', color: 'gray' },
   'to-refine': { label: 'To refine', short: 'refine', glyph: '○', color: 'gray' },
   refined: { label: 'Refined, ready to build', short: 'refined', glyph: '◔', color: 'blue' },
   building: { label: 'Building', short: 'build', glyph: '◑', color: 'yellow' },
@@ -32,9 +33,10 @@ export const STAGE_LOOK: Record<Stage, StageLook> = {
   merged: { label: 'Merged, last 7 days', short: 'merged', glyph: '✔', color: 'green' },
 }
 
-// The order the flow line reads in, and the order the sections stack in.
-export const FLOW: readonly Stage[] = ['to-refine', 'refined', 'building', 'pr', 'ready', 'merged']
-const SECTIONS: readonly Stage[] = ['ready', 'pr', 'building', 'refined', 'to-refine', 'merged']
+// Top to bottom: done first, then each step back towards what is coming up.
+// The flow line reads in the same order.
+export const FLOW: readonly Stage[] = ['merged', 'ready', 'pr', 'building', 'refined', 'to-refine', 'coming-up']
+const SECTIONS = FLOW
 
 const CHECK_LOOK = {
   pass: { glyph: '✓', color: 'green', text: 'CI green' },
@@ -169,7 +171,7 @@ export async function renderPane($: EngineInterface, ui: UiKit, rows: number): P
     <Text wrap="wrap">
       {FLOW.map((s, i) => (
         <Text key={`f-${s}`}>
-          {i > 0 ? <Text dimColor> → </Text> : null}
+          {i > 0 ? <Text dimColor> · </Text> : null}
           <Text color={STAGE_LOOK[s].color} bold={byStage(s).length > 0}>
             {byStage(s).length} {STAGE_LOOK[s].short}
           </Text>

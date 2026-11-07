@@ -1,7 +1,8 @@
 // The pipeline as the pane sees it: the repository's tickets, its pull
 // requests, the app's sessions working on them, and where each ticket stands.
 
-export type Stage = 'to-refine' | 'refined' | 'building' | 'pr' | 'ready' | 'merged'
+// coming-up: an open ticket with no to-refine or refined label yet.
+export type Stage = 'coming-up' | 'to-refine' | 'refined' | 'building' | 'pr' | 'ready' | 'merged'
 
 export type Checks = 'pass' | 'fail' | 'pending' | 'none'
 

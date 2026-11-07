@@ -146,7 +146,8 @@ const stageOf = (issue: Issue, pr: Pr | undefined, session: SessionInfo | undefi
   if (issue.isClosed || (pr?.state === 'MERGED' && !session?.isRunning)) return 'merged'
   if (pr?.state === 'OPEN') return isReady(pr) ? 'ready' : 'pr'
   if (session && issue.labels.includes('refined')) return 'building'
-  return issue.labels.includes('refined') ? 'refined' : 'to-refine'
+  if (issue.labels.includes('refined')) return 'refined'
+  return issue.labels.includes('to-refine') ? 'to-refine' : 'coming-up'
 }
 
 const needsYouOf = (issue: Issue, pr: Pr | undefined, session: SessionInfo | undefined): string | undefined => {

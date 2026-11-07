@@ -37,6 +37,8 @@ export const demoBoard = (now: number): Board => ({
     issue(102, 'Preferred supplier and offering', ['to-refine'], 52, now),
     issue(103, 'Dark mode for the drawing canvas', ['to-refine'], 70, now),
     issue(104, 'Spike: offline sync with CRDTs', ['spike', 'to-refine'], 8, now),
+    issue(105, 'Print the plan on A3', [], 6, now),
+    issue(106, 'Import a floor plan from PDF', ['enhancement'], 12, now),
     issue(110, 'Show the four poll steps per segment', ['refined', 'size:3'], 20, now),
     issue(111, 'Default offering in the catalogue API', ['refined', 'size:2'], 26, now),
     issue(112, 'Let a visitor take the practice check', ['refined', 'size:8'], 40, now),

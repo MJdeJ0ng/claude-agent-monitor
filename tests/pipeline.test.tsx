@@ -84,6 +84,7 @@ test('puts each ticket at its stage and flags what needs the person', () => {
   expect(at(9)?.stage).toBe('merged')
   expect(at(9)?.needsYou).toBe('PR #39 merged: close the issue?')
   expect(at(8)?.isSpike).toBe(true)
+  expect(at(8)?.stage).toBe('coming-up')
   expect(at(5)?.stage).toBe('merged')
   expect(at(4)).toBeUndefined()
 })
@@ -140,7 +141,7 @@ test('the demo board puts tickets at every stage and in needs-you', () => {
   const now = Date.now()
   const tickets = toTickets(demoBoard(now), demoSessions(), now)
   const stages = new Set(tickets.map(t => t.stage))
-  expect([...stages].sort()).toEqual(['building', 'merged', 'pr', 'ready', 'refined', 'to-refine'])
+  expect([...stages].sort()).toEqual(['building', 'coming-up', 'merged', 'pr', 'ready', 'refined', 'to-refine'])
   expect(tickets.filter(t => t.needsYou).length).toBeGreaterThan(3)
 })
 
