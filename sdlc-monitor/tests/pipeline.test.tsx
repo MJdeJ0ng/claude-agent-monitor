@@ -181,3 +181,39 @@ test('reads the plan order from GraphQL', () => {
     { number: 3, parent: undefined, position: undefined, blockers: [], isEpic: true },
   ])
 })
+
+test('a merged PR that closes nothing does not ask to close its ticket', () => {
+  const b: Board = {
+    repo: 'me/repo', root: 'C:/Repo', fetchedAt: NOW,
+    issues: parseIssues(JSON.stringify([{ number: 3, title: 'Epic: phase 1', labels: [{ name: 'refined' }], updatedAt: iso(1) }]), false),
+    prs: parsePrs(JSON.stringify([
+      { number: 19, title: 'docs: reading level', headRefName: '3-reading-level-allowlist', state: 'MERGED', isDraft: false, mergeable: 'UNKNOWN', statusCheckRollup: [], closingIssuesReferences: [], mergedAt: iso(2), url: '' },
+    ])),
+    order: [{ number: 3, blockers: [], isEpic: true }],
+  }
+  const t = toTickets(b, [], NOW).find(x => x.number === 3)
+  expect(t?.needsYou).toBeUndefined()
+  expect(t?.stage).toBe('refined')
+})
+
+test('an epic is never asked to be closed after a merged PR', () => {
+  const b: Board = {
+    repo: 'me/repo', root: 'C:/Repo', fetchedAt: NOW,
+    issues: parseIssues(JSON.stringify([{ number: 3, title: 'Epic', labels: [], updatedAt: iso(1) }]), false),
+    prs: parsePrs(JSON.stringify([
+      { number: 20, title: 'x', headRefName: 'x', state: 'MERGED', isDraft: false, mergeable: 'UNKNOWN', statusCheckRollup: [], closingIssuesReferences: [{ number: 3 }], mergedAt: iso(2), url: '' },
+    ])),
+    order: [{ number: 3, blockers: [], isEpic: true }],
+  }
+  expect(toTickets(b, [], NOW).find(x => x.number === 3)?.needsYou).toBeUndefined()
+})
+
+test('a running session titled after a ticket to refine shows as refining', () => {
+  const rows = JSON.stringify([
+    { sessionId: 'local_r', title: 'Refine #15 practice check', cwd: 'C:\\Repo', isRunning: true, isArchived: false },
+  ])
+  const t = toTickets(board(), parseSessions(rows, 'C:/Repo'), NOW).find(x => x.number === 15)
+  expect(t?.stage).toBe('to-refine')
+  expect(t?.activity).toBe('refining')
+  expect(t?.needsYou).toBeUndefined()
+})

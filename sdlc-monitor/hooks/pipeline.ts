@@ -107,8 +107,13 @@ const sizeOf = (labels: string[]): number | undefined => {
   return label ? Number(label.slice(5)) : undefined
 }
 
+// The tickets a PR is for: the ones it closes; for an open PR that closes
+// none, the one its branch or title names. A merged PR that closed nothing
+// (it only related to a ticket, such as an epic) says nothing about that
+// ticket's state, so it is not linked.
 const prIssues = (pr: Pr): number[] => {
   if (pr.closes.length > 0) return pr.closes
+  if (pr.state !== 'OPEN') return []
   const n = issueOfBranch(pr.branch) ?? issueOfTitle(pr.title)
   return n === undefined ? [] : [n]
 }
@@ -204,7 +209,7 @@ const stageOf = (issue: Issue, pr: Pr | undefined, session: SessionInfo | undefi
   return 'to-refine'
 }
 
-const needsYouOf = (issue: Issue, pr: Pr | undefined, session: SessionInfo | undefined): string | undefined => {
+const needsYouOf = (issue: Issue, pr: Pr | undefined, session: SessionInfo | undefined, isEpic: boolean): string | undefined => {
   if (issue.isClosed) return undefined
   const isWorked = session?.isRunning === true
   if (pr?.state === 'OPEN') {
@@ -214,8 +219,17 @@ const needsYouOf = (issue: Issue, pr: Pr | undefined, session: SessionInfo | und
     if (pr.checks === 'fail') return `CI red on PR #${pr.number}, nobody on it`
     return undefined
   }
-  if (pr?.state === 'MERGED') return `PR #${pr.number} merged: close the issue?`
+  if (pr?.state === 'MERGED') return isEpic ? undefined : `PR #${pr.number} merged: close the issue?`
   if (session && !session.isRunning && !session.isSelf) return 'session idle: waiting on you?'
+  return undefined
+}
+
+// What a session on the ticket is doing: refining a ticket still to refine,
+// building one that is refined.
+const activityOf = (stage: Stage, session: SessionInfo | undefined): Ticket['activity'] => {
+  if (!session?.isRunning) return undefined
+  if (stage === 'to-refine') return 'refining'
+  if (stage === 'building') return 'building'
   return undefined
 }
 
@@ -228,17 +242,20 @@ export const toTickets = (board: Board, sessions: SessionInfo[], now: number): T
     .map(issue => {
       const pr = prMap.get(issue.number)
       const session = sessionMap.get(issue.number)
+      const isEpic = orderMap.get(issue.number)?.isEpic ?? false
+      const stage = stageOf(issue, pr, session)
       return {
         number: issue.number,
         title: issue.title,
-        stage: stageOf(issue, pr, session),
+        stage,
+        activity: activityOf(stage, session),
         size: sizeOf(issue.labels),
         isSpike: issue.labels.includes('spike'),
         pr,
         session,
-        needsYou: needsYouOf(issue, pr, session),
+        needsYou: needsYouOf(issue, pr, session, isEpic),
         blockers: orderMap.get(issue.number)?.blockers ?? [],
-        isEpic: orderMap.get(issue.number)?.isEpic ?? false,
+        isEpic,
         priority: priorityOf(issue.labels),
         parent: orderMap.get(issue.number)?.parent,
         position: orderMap.get(issue.number)?.position,

@@ -1,6 +1,6 @@
 {
   "name": "sdlc-monitor",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "license": "MIT",
   "description": "Live pane showing where each ticket of this repository stands in the AI-SDLC: to refine, refined, building, PR, ready to merge, merged, and what waits on you.",
   "types": "./types/index.d.ts"

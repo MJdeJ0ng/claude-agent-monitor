@@ -99,7 +99,9 @@ export async function renderPane($: EngineInterface, ui: UiKit, rows: number): P
     if (t.session) {
       parts.push(
         t.session.isRunning ? (
-          <Text color="yellow">⚙ {t.session.isSelf ? 'this session' : 'session'} working</Text>
+          <Text color="yellow">
+            ⚙ {t.session.isSelf ? 'this session' : 'session'} {t.activity ?? 'working'}
+          </Text>
         ) : (
           <Text dimColor>⏸ session idle</Text>
         ),
@@ -148,7 +150,7 @@ export async function renderPane($: EngineInterface, ui: UiKit, rows: number): P
               {look.label}
             </Text>
             <Text dimColor> {items.length}</Text>
-            {isShut && items.length > 0 ? <Text dimColor> · {items.map(t => `#${t.number}`).join(' ')}</Text> : null}
+            {isShut && items.length > 0 ? <Text dimColor> · {items.map(t => `#${t.number}${t.activity ? '⚙' : ''}`).join(' ')}</Text> : null}
           </Text>
         </Button>
         {!isShut && items.length === 0 && (
@@ -181,25 +183,24 @@ export async function renderPane($: EngineInterface, ui: UiKit, rows: number): P
 
   const header = (
     <Box flexDirection="column">
-      {titleRow(
-        <Text>
-          <Text bold color="cyan">
-            ◆ Operations Room{' '}
+      <Text wrap="truncate-end">
+        <Text bold color="cyan">
+          ◆ Operations Room{' '}
+        </Text>
+        <Text dimColor>{b.repo || 'no repository'}</Text>
+        {b.isDemo ? (
+          <Text backgroundColor="magenta" color="black" bold>
+            {' DEMO '}
           </Text>
-          <Text dimColor>{b.repo || 'no repository'}</Text>
-          {b.isDemo ? (
-            <Text backgroundColor="magenta" color="black" bold>
-              {' DEMO '}
-            </Text>
-          ) : null}
-        </Text>,
-        <Button key="refresh" plain onPress={refresh}>
-          <Text dimColor underline>
-            {b.fetchedAt ? `${ago(now - b.fetchedAt)} ago ⟳` : 'loading ⟳'}
-          </Text>
-        </Button>,
-      )}
+        ) : null}
+      </Text>
       {b.repo ? flowLine : null}
+      {/* A button on a row of its own: beside text on the desktop it squeezes the text into a column. */}
+      <Button key="refresh" plain onPress={refresh}>
+        <Text dimColor underline>
+          {b.fetchedAt ? `updated ${ago(now - b.fetchedAt)} ago ⟳` : 'loading ⟳'}
+        </Text>
+      </Button>
     </Box>
   )
 
@@ -250,7 +251,7 @@ export async function renderPane($: EngineInterface, ui: UiKit, rows: number): P
             </Text>,
             <Text color={STAGE_LOOK[t.stage].color}>
               {t.priority < 2 ? <Text color="red">{t.priority === 0 ? '!! ' : '! '}</Text> : null}
-              {STAGE_LOOK[t.stage].short}
+              {t.activity === 'refining' ? <Text color="yellow">⚙ refining</Text> : STAGE_LOOK[t.stage].short}
               {sizeTag(t)}
             </Text>,
           )}

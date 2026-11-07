@@ -71,6 +71,8 @@ export type Ticket = {
   isSpike: boolean
   pr?: Pr
   session?: SessionInfo
+  // A running session on the ticket: refining it or building it.
+  activity?: 'refining' | 'building'
   // Open tickets this one waits on.
   blockers: number[]
   isEpic: boolean
