@@ -1,0 +1,3 @@
+hooks/*.js
+tests/*.js
+.claude-plugin/types/
