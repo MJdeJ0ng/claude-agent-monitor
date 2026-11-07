@@ -1,0 +1,5 @@
+{
+  "name": "maarten-sdlc-monitor",
+  "owner": { "name": "Maarten de Jong" },
+  "plugins": [{ "name": "sdlc-monitor", "source": "./" }]
+}
