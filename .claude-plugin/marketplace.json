@@ -1,5 +1,9 @@
 {
   "name": "maarten-local-mods",
   "owner": { "name": "Maarten de Jong" },
-  "plugins": [{ "name": "agent-monitor", "source": "./" }]
+  "description": "Live panes for Claude Code: agent-monitor (agents and sessions at work) and sdlc-monitor (tickets through the AI-SDLC).",
+  "plugins": [
+    { "name": "agent-monitor", "source": "./agent-monitor" },
+    { "name": "sdlc-monitor", "source": "./sdlc-monitor" }
+  ]
 }

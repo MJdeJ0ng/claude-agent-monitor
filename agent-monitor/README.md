@@ -22,6 +22,8 @@ The wording has a light WW2 flavour, from Europe and the Pacific: the main sessi
 
 Open it with the `/agent-monitor` command; it also opens at session start and updates as work happens.
 
+Companion mod: [sdlc-monitor](../sdlc-monitor/README.md) shows where each ticket of the repository stands in the pipeline; agent-monitor shows the agents and sessions doing the work.
+
 ## Install
 
 At the prompt of a terminal session:

@@ -8,4 +8,24 @@ A live pane, "Operations Room", that shows where each ticket of the current repo
 
 Where the data comes from: `git` finds the repository (worktrees included), `gh` reads the issues (labels `to-refine`, `refined`, `size:n`, `spike`) and the pull requests every 60 s, and the desktop app's `list_sessions` tool is read every 10 s to link sessions to tickets by branch (`claude/16-…`) or title (`#16`). Session polling only runs when that tool is allowed without a prompt.
 
-Command: `/sdlc-monitor`. Needs `gh` signed in.
+Command: `/sdlc-monitor`; `/sdlc-monitor demo` fills the pane with made-up tickets to look at, `/sdlc-monitor live` goes back. Needs the GitHub CLI (`gh`) signed in.
+
+Companion mod: [agent-monitor](../agent-monitor/README.md) shows the agents and sessions doing the work; sdlc-monitor shows where the tickets stand.
+
+## Install
+
+At the prompt of a terminal session:
+
+```
+/plugin install sdlc-monitor --marketplace MJdeJ0ng/claude-agent-monitor
+```
+
+Answer `y` to add the marketplace, then pick a scope (user is first).
+
+From a shell:
+
+```
+claude plugin install sdlc-monitor --marketplace MJdeJ0ng/claude-agent-monitor
+```
+
+In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `MJdeJ0ng/claude-agent-monitor`, then Add plugin.
