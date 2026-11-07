@@ -143,3 +143,17 @@ test('the demo board puts tickets at every stage and in needs-you', () => {
   expect([...stages].sort()).toEqual(['building', 'merged', 'pr', 'ready', 'refined', 'to-refine'])
   expect(tickets.filter(t => t.needsYou).length).toBeGreaterThan(3)
 })
+
+test('stages start folded to one line with their ticket numbers', async ($, on) => {
+  on('clock.every', () => ({ value: undefined }))
+  on('command.register', () => ({ value: { command: 'sdlc-monitor' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: 'no repo', isStdoutTruncated: false, isStderrTruncated: false } }))
+  await $.session.start({ cwd: 'C:/Nowhere', surface: 'desktop', isInteractive: true })
+  await $.command.run({ command: 'sdlc-monitor', args: 'demo' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /▸ In review \(PR\) 4 · #\d+ #\d+/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /▾ / })).toBeUndefined()
+  await ui.unmount()
+})

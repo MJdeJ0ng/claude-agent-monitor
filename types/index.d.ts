@@ -69,7 +69,8 @@ declare module 'claude-code' {
     'sdlc-monitor': {
       board: Shaped<Board>
       sessions: Shaped<SessionInfo[]>
-      collapsed: Shaped<string[]>
+      // The one stage unfolded, '' for none.
+      open: Shaped<string>
     }
   }
 }

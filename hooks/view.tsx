@@ -3,7 +3,7 @@ import type { Elements, EngineInterface } from 'claude-code'
 
 import type { Board, SessionInfo, Stage, Ticket } from '../types'
 import { toTickets } from './pipeline'
-import { DEFAULT_COLLAPSED, ROWS_PER_STAGE, SHAPES } from './state'
+import { NEEDS_YOU_ROWS, ROWS_PER_STAGE, SHAPES } from './state'
 import { refreshBoard } from './fetch'
 
 // The pane: what waits on the person first, then each stage from nearly done
@@ -14,8 +14,9 @@ const board = atom({ plugin: 'sdlc-monitor', key: 'board' } as const, EMPTY, { s
 const sessions = atom({ plugin: 'sdlc-monitor', key: 'sessions' } as const, [] as SessionInfo[], {
   shape: SHAPES.sessions,
 })
-const collapsed = atom({ plugin: 'sdlc-monitor', key: 'collapsed' } as const, DEFAULT_COLLAPSED, {
-  shape: SHAPES.collapsed,
+// One stage unfolded at a time, so the pane stays short beside the agent tree.
+const openStage = atom({ plugin: 'sdlc-monitor', key: 'open' } as const, '', {
+  shape: SHAPES.open,
 })
 
 export type UiKit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
@@ -57,14 +58,14 @@ export async function renderPane($: EngineInterface, ui: UiKit, rows: number): P
   const { Box, Text, Button } = ui
   const b = await read($, board)
   const list = await read($, sessions)
-  const shut = await read($, collapsed)
+  const unfolded = await read($, openStage)
   const now = Date.now()
   const tickets = toTickets(b, list, now)
   const byStage = (s: Stage) => tickets.filter(t => t.stage === s)
   const waiting = tickets.filter(t => t.needsYou)
 
   const toggle = (stage: Stage) => () =>
-    void update($, collapsed, xs => (xs.includes(stage) ? xs.filter(x => x !== stage) : [...xs, stage]))
+    void update($, openStage, now => (now === stage ? '' : stage))
   const refresh = () => void refreshBoard($)
 
   const titleRow = (left: JSX.Children, right: JSX.Children) => (
@@ -136,16 +137,17 @@ export async function renderPane($: EngineInterface, ui: UiKit, rows: number): P
   const section = (stage: Stage) => {
     const look = STAGE_LOOK[stage]
     const items = byStage(stage)
-    const isShut = shut.includes(stage)
+    const isShut = unfolded !== stage
     return (
-      <Box key={`s-${stage}`} flexDirection="column" marginTop={1}>
+      <Box key={`s-${stage}`} flexDirection="column">
         <Button key={`b-${stage}`} plain onPress={toggle(stage)}>
-          <Text>
+          <Text wrap="truncate-end">
             <Text dimColor>{isShut ? '▸ ' : '▾ '}</Text>
-            <Text bold color={look.color}>
+            <Text bold={items.length > 0} color={items.length > 0 ? look.color : 'gray'}>
               {look.label}
             </Text>
-            <Text dimColor> ({items.length})</Text>
+            <Text dimColor> {items.length}</Text>
+            {isShut && items.length > 0 ? <Text dimColor> · {items.map(t => `#${t.number}`).join(' ')}</Text> : null}
           </Text>
         </Button>
         {!isShut && items.length === 0 && (
@@ -230,7 +232,7 @@ export async function renderPane($: EngineInterface, ui: UiKit, rows: number): P
         <Text dimColor> {waiting.length}</Text>
       </Text>
       {waiting.length === 0 && <Text dimColor>{quiet[Math.floor(now / 60_000) % quiet.length]}</Text>}
-      {waiting.slice(0, Math.max(3, Math.floor(rows / 4))).map(t => (
+      {waiting.slice(0, NEEDS_YOU_ROWS).map(t => (
         <Box key={`n${t.number}`}>
           <Box flexShrink={0}>
             <Text color="yellow">➜ </Text>
@@ -243,6 +245,7 @@ export async function renderPane($: EngineInterface, ui: UiKit, rows: number): P
           </Box>
         </Box>
       ))}
+      {waiting.length > NEEDS_YOU_ROWS && <Text dimColor>  +{waiting.length - NEEDS_YOU_ROWS} more</Text>}
     </Box>
   )
 
@@ -250,7 +253,9 @@ export async function renderPane($: EngineInterface, ui: UiKit, rows: number): P
     <Box flexDirection="column">
       {header}
       {needsYou}
-      {SECTIONS.map(section)}
+      <Box flexDirection="column" marginTop={1}>
+        {SECTIONS.map(section)}
+      </Box>
     </Box>
   )
 }
