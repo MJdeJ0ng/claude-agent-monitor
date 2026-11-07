@@ -3,7 +3,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { Board, SessionInfo } from '../types'
 import { demoBoard, demoSessions } from './demo'
-import { issueOfBranch, parseIssues, parsePrs, parseSessions } from './pipeline'
+import { issueOfBranch, parseIssues, parseOrder, parsePrs, parseSessions } from './pipeline'
 import { GH_TIMEOUT_MS, LIST_SESSIONS_TOOL, SHAPES, live } from './state'
 
 // Reads the pipeline from outside: git for the repository, gh for tickets and
@@ -17,6 +17,21 @@ const sessions = atom({ plugin: 'sdlc-monitor', key: 'sessions' } as const, [] a
 })
 
 const ISSUE_FIELDS = 'number,title,labels,updatedAt,closedAt'
+// Each open issue's epic, its place among the epic's sub-issues and its open
+// blockers: the plan's order, which gh issue list does not give.
+const ORDER_QUERY = `query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    issues(first: 100, states: OPEN) {
+      nodes {
+        number
+        parent { number subIssues(first: 100) { nodes { number } } }
+        subIssues(first: 1) { totalCount }
+        blockedBy(first: 20) { nodes { number state } }
+      }
+    }
+  }
+}`
+
 const PR_FIELDS = 'number,title,headRefName,state,isDraft,mergeable,statusCheckRollup,closingIssuesReferences,mergedAt,updatedAt,url'
 
 async function run($: EngineInterface, argv: string[], cwd: string): Promise<string> {
@@ -68,10 +83,13 @@ export async function refreshBoard($: EngineInterface): Promise<void> {
     if (!(await findRepo($))) return await fail($, 'This session is not inside a git repository.')
     const at = live.root
     if (!live.repo) live.repo = await run($, ['gh', 'repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], at)
-    const [open, closed, prs] = await Promise.all([
+    const [owner = '', name = ''] = live.repo.split('/')
+    const [open, closed, prs, order] = await Promise.all([
       run($, ['gh', 'issue', 'list', '--state', 'open', '--limit', '200', '--json', ISSUE_FIELDS], at),
       run($, ['gh', 'issue', 'list', '--state', 'closed', '--limit', '20', '--json', ISSUE_FIELDS], at),
       run($, ['gh', 'pr', 'list', '--state', 'all', '--limit', '40', '--json', PR_FIELDS], at),
+      // Without the order the queue falls back to issue numbers.
+      run($, ['gh', 'api', 'graphql', '-f', `query=${ORDER_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`], at).catch(() => ''),
     ])
     const next: Board = {
       repo: live.repo,
@@ -79,6 +97,7 @@ export async function refreshBoard($: EngineInterface): Promise<void> {
       fetchedAt: Date.now(),
       issues: [...parseIssues(open, false), ...parseIssues(closed, true)],
       prs: parsePrs(prs),
+      order: order ? parseOrder(order) : undefined,
     }
     await update($, board, () => next)
   } catch (err) {

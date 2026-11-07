@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { checksOf, issueOfBranch, issueOfTitle, parseIssues, parsePrs, parseSessions, toTickets } from '../hooks/pipeline'
+import { checksOf, issueOfBranch, issueOfTitle, parseIssues, parseOrder, parsePrs, parseSessions, toTickets, upNext } from '../hooks/pipeline'
 import { demoBoard, demoSessions } from '../hooks/demo'
 import type { Board } from '../types'
 
@@ -85,7 +85,7 @@ test('puts each ticket at its stage and flags what needs the person', () => {
   expect(at(9)?.stage).toBe('merged')
   expect(at(9)?.needsYou).toBe('PR #39 merged: close the issue?')
   expect(at(8)?.isSpike).toBe(true)
-  expect(at(8)?.stage).toBe('coming-up')
+  expect(at(8)?.stage).toBe('to-refine')
   expect(at(5)?.stage).toBe('merged')
   expect(at(4)).toBeUndefined()
   expect(at(3)).toBeUndefined()
@@ -143,7 +143,7 @@ test('the demo board puts tickets at every stage and in needs-you', () => {
   const now = Date.now()
   const tickets = toTickets(demoBoard(now), demoSessions(), now)
   const stages = new Set(tickets.map(t => t.stage))
-  expect([...stages].sort()).toEqual(['building', 'coming-up', 'merged', 'pr', 'ready', 'refined', 'to-refine'])
+  expect([...stages].sort()).toEqual(['building', 'merged', 'pr', 'ready', 'refined', 'to-refine'])
   expect(tickets.filter(t => t.needsYou).length).toBeGreaterThan(3)
 })
 
@@ -159,4 +159,25 @@ test('stages start folded to one line with their ticket numbers', async ($, on) 
   expect(await ui.find({ type: 'Text', text: /▸ In review \(PR\) 4 · #\d+ #\d+/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /▾ / })).toBeUndefined()
   await ui.unmount()
+})
+
+test('coming up follows priority, blockers and the epic order', () => {
+  const now = Date.now()
+  const queue = upNext(toTickets(demoBoard(now), demoSessions(), now), 5)
+  // #101 is priority-high; #112 waits on #110 so it drops behind the rest.
+  expect(queue.map(t => t.number)).toEqual([101, 111, 110, 105, 102])
+  expect(queue.some(t => t.isEpic)).toBe(false)
+})
+
+test('reads the plan order from GraphQL', () => {
+  const text = JSON.stringify({
+    data: { repository: { issues: { nodes: [
+      { number: 11, parent: { number: 3, subIssues: { nodes: [{ number: 8 }, { number: 11 }] } }, subIssues: { totalCount: 0 }, blockedBy: { nodes: [{ number: 8, state: 'CLOSED' }, { number: 9, state: 'OPEN' }] } },
+      { number: 3, parent: null, subIssues: { totalCount: 12 }, blockedBy: { nodes: [] } },
+    ] } } },
+  })
+  expect(parseOrder(text)).toEqual([
+    { number: 11, parent: 3, position: 1, blockers: [9], isEpic: false },
+    { number: 3, parent: undefined, position: undefined, blockers: [], isEpic: true },
+  ])
 })

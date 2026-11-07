@@ -1,4 +1,4 @@
-import type { Board, Checks, Issue, Pr, SessionInfo, Stage, Ticket } from '../types'
+import type { Board, Checks, Issue, OrderInfo, Pr, SessionInfo, Stage, Ticket } from '../types'
 
 // Pure logic: turn gh's JSON and the app's session list into tickets, each
 // at one stage of the pipeline, with what waits on the person.
@@ -142,12 +142,66 @@ const sessionsByIssue = (sessions: SessionInfo[], prs: Pr[]): Map<number, Sessio
 const isReady = (pr: Pr): boolean =>
   pr.state === 'OPEN' && !pr.isDraft && pr.mergeable === 'MERGEABLE' && (pr.checks === 'pass' || pr.checks === 'none')
 
+const priorityOf = (labels: string[]): number =>
+  labels.includes('priority-critical') ? 0 : labels.includes('priority-high') ? 1 : 2
+
+type Json = Record<string, unknown>
+const obj = (v: unknown): Json => (v && typeof v === 'object' ? (v as Json) : {})
+const nodesOf = (v: unknown): Json[] => {
+  const n = obj(v).nodes
+  return Array.isArray(n) ? n.map(obj) : []
+}
+
+// The plan's order from GitHub's GraphQL: each open issue's epic and place
+// among the epic's sub-issues, whether it is an epic, and its open blockers.
+export const parseOrder = (text: string): OrderInfo[] => {
+  try {
+    const repo = obj(obj(obj(JSON.parse(text)).data).repository)
+    return nodesOf(repo.issues).flatMap(n => {
+      if (typeof n.number !== 'number') return []
+      const parent = obj(n.parent)
+      const siblings = nodesOf(parent.subIssues).map(x => x.number)
+      const position = siblings.indexOf(n.number)
+      const blockers = nodesOf(n.blockedBy)
+        .filter(b => typeof b.number === 'number' && str(b.state).toUpperCase() === 'OPEN')
+        .map(b => b.number as number)
+      const total = obj(n.subIssues).totalCount
+      return [
+        {
+          number: n.number,
+          parent: typeof parent.number === 'number' ? parent.number : undefined,
+          position: position >= 0 ? position : undefined,
+          blockers,
+          isEpic: typeof total === 'number' && total > 0,
+        },
+      ]
+    })
+  } catch {
+    return []
+  }
+}
+
+// The next tickets to pick up, in the plan's order: priority first, then
+// what is not blocked, then the epic's sub-issue order, then the number.
+export const upNext = (tickets: Ticket[], count: number): Ticket[] =>
+  tickets
+    .filter(t => (t.stage === 'refined' || t.stage === 'to-refine') && !t.isEpic)
+    .sort(
+      (a, b) =>
+        a.priority - b.priority ||
+        Number(a.blockers.length > 0) - Number(b.blockers.length > 0) ||
+        (a.parent ?? a.number) - (b.parent ?? b.number) ||
+        (a.position ?? 0) - (b.position ?? 0) ||
+        a.number - b.number,
+    )
+    .slice(0, count)
+
 const stageOf = (issue: Issue, pr: Pr | undefined, session: SessionInfo | undefined): Stage => {
   if (issue.isClosed || (pr?.state === 'MERGED' && !session?.isRunning)) return 'merged'
   if (pr?.state === 'OPEN') return isReady(pr) ? 'ready' : 'pr'
   if (session && issue.labels.includes('refined')) return 'building'
   if (issue.labels.includes('refined')) return 'refined'
-  return issue.labels.includes('to-refine') ? 'to-refine' : 'coming-up'
+  return 'to-refine'
 }
 
 const needsYouOf = (issue: Issue, pr: Pr | undefined, session: SessionInfo | undefined): string | undefined => {
@@ -167,6 +221,7 @@ const needsYouOf = (issue: Issue, pr: Pr | undefined, session: SessionInfo | und
 
 export const toTickets = (board: Board, sessions: SessionInfo[], now: number): Ticket[] => {
   const prMap = prsByIssue(board.prs)
+  const orderMap = new Map((board.order ?? []).map(o => [o.number, o]))
   const sessionMap = sessionsByIssue(sessions, board.prs)
   return board.issues
     .filter(i => !i.isClosed || now - i.at < MERGED_WINDOW_MS)
@@ -182,6 +237,11 @@ export const toTickets = (board: Board, sessions: SessionInfo[], now: number): T
         pr,
         session,
         needsYou: needsYouOf(issue, pr, session),
+        blockers: orderMap.get(issue.number)?.blockers ?? [],
+        isEpic: orderMap.get(issue.number)?.isEpic ?? false,
+        priority: priorityOf(issue.labels),
+        parent: orderMap.get(issue.number)?.parent,
+        position: orderMap.get(issue.number)?.position,
         at: Math.max(issue.at, pr?.at ?? 0),
       }
     })

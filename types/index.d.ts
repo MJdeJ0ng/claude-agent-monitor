@@ -1,8 +1,7 @@
 // The pipeline as the pane sees it: the repository's tickets, its pull
 // requests, the app's sessions working on them, and where each ticket stands.
 
-// coming-up: an open ticket with no to-refine or refined label yet.
-export type Stage = 'coming-up' | 'to-refine' | 'refined' | 'building' | 'pr' | 'ready' | 'merged'
+export type Stage = 'to-refine' | 'refined' | 'building' | 'pr' | 'ready' | 'merged'
 
 export type Checks = 'pass' | 'fail' | 'pending' | 'none'
 
@@ -40,12 +39,24 @@ export type SessionInfo = {
   isSelf?: boolean
 }
 
+// Where an open ticket sits in the plan: its epic, its place among the epic's
+// sub-issues, and the open tickets it is blocked by.
+export type OrderInfo = {
+  number: number
+  parent?: number
+  position?: number
+  blockers: number[]
+  isEpic: boolean
+}
+
 export type Board = {
   repo: string
   root: string
   fetchedAt: number
   issues: Issue[]
   prs: Pr[]
+  // Missing when GitHub's GraphQL could not be read: then issue number order.
+  order?: OrderInfo[]
   // Made-up tickets from `/sdlc-monitor demo`, not the tracker.
   isDemo?: boolean
   // Why the board is empty: not a repository, gh missing or signed out.
@@ -60,6 +71,13 @@ export type Ticket = {
   isSpike: boolean
   pr?: Pr
   session?: SessionInfo
+  // Open tickets this one waits on.
+  blockers: number[]
+  isEpic: boolean
+  // 0 critical, 1 high, 2 default.
+  priority: number
+  parent?: number
+  position?: number
   // What the person has to do for this ticket, if anything.
   needsYou?: string
   at: number

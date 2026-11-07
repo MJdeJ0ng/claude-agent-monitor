@@ -1,4 +1,4 @@
-import type { Board, Issue, Pr, SessionInfo } from '../types'
+import type { Board, Issue, OrderInfo, Pr, SessionInfo } from '../types'
 
 // Made-up tickets for `/sdlc-monitor demo`: one or more at every stage and
 // every kind of "needs you", so the pane can be seen without a real tracker.
@@ -32,8 +32,10 @@ export const demoBoard = (now: number): Board => ({
   root: 'demo',
   fetchedAt: now,
   isDemo: true,
+  order: demoOrder(),
   issues: [
-    issue(101, 'Export the BOM to Excel', ['to-refine'], 30, now),
+    issue(100, 'Epic: phase 1, launch and poll', ['refined'], 40, now),
+    issue(101, 'Export the BOM to Excel', ['to-refine', 'priority-high'], 30, now),
     issue(102, 'Preferred supplier and offering', ['to-refine'], 52, now),
     issue(103, 'Dark mode for the drawing canvas', ['to-refine'], 70, now),
     issue(104, 'Spike: offline sync with CRDTs', ['spike', 'to-refine'], 8, now),
@@ -64,6 +66,14 @@ export const demoBoard = (now: number): Board => ({
     pr(208, 151, 'design-base', { state: 'MERGED', mergeable: 'UNKNOWN' }, 40, now),
   ],
 })
+
+// Epic #100 plans its stories in this order; #112 waits on #110.
+const PLAN = [111, 110, 112, 105, 102, 103, 101, 106]
+
+export const demoOrder = (): OrderInfo[] => [
+  { number: 100, blockers: [], isEpic: true },
+  ...PLAN.map((number, position) => ({ number, parent: 100, position, blockers: number === 112 ? [110] : [], isEpic: false })),
+]
 
 export const demoSessions = (): SessionInfo[] => [
   { id: 'demo-1', title: 'Build #120 dashboard', branch: 'claude/120-dashboard-a1b2c3', isRunning: true },

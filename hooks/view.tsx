@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface } from 'claude-code'
 
 import type { Board, SessionInfo, Stage, Ticket } from '../types'
-import { toTickets } from './pipeline'
-import { NEEDS_YOU_ROWS, ROWS_PER_STAGE, SHAPES } from './state'
+import { toTickets, upNext } from './pipeline'
+import { NEEDS_YOU_ROWS, QUEUE_ROWS, ROWS_PER_STAGE, SHAPES } from './state'
 import { refreshBoard } from './fetch'
 
 // The pane: what waits on the person first, then each stage from nearly done
@@ -24,7 +24,6 @@ export type UiKit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 type StageLook = { label: string; short: string; glyph: string; color: string }
 
 export const STAGE_LOOK: Record<Stage, StageLook> = {
-  'coming-up': { label: 'Coming up', short: 'coming', glyph: '·', color: 'gray' },
   'to-refine': { label: 'To refine', short: 'refine', glyph: '○', color: 'gray' },
   refined: { label: 'Refined, ready to build', short: 'refined', glyph: '◔', color: 'blue' },
   building: { label: 'Building', short: 'build', glyph: '◑', color: 'yellow' },
@@ -33,9 +32,9 @@ export const STAGE_LOOK: Record<Stage, StageLook> = {
   merged: { label: 'Merged, last 24h', short: 'merged', glyph: '✔', color: 'green' },
 }
 
-// Top to bottom: done first, then each step back towards what is coming up.
-// The flow line reads in the same order.
-export const FLOW: readonly Stage[] = ['merged', 'ready', 'pr', 'building', 'refined', 'to-refine', 'coming-up']
+// Top to bottom: done first, then each step back towards the backlog, then
+// the queue of what is coming up. The flow line reads in the same order.
+export const FLOW: readonly Stage[] = ['merged', 'ready', 'pr', 'building', 'refined', 'to-refine']
 const SECTIONS = FLOW
 
 const CHECK_LOOK = {
@@ -225,6 +224,41 @@ export async function renderPane($: EngineInterface, ui: UiKit, rows: number): P
     )
   }
 
+  // The next tickets in the plan's order, numbered, with their stage and
+  // what still blocks them.
+  const queue = upNext(tickets, QUEUE_ROWS)
+  const comingUp = (
+    <Box flexDirection="column" marginTop={1}>
+      <Text>
+        <Text bold color="cyan">
+          Coming up
+        </Text>
+        <Text dimColor>
+          {' '}
+          next {queue.length}
+          {b.order ? '' : ' · by number, plan order unavailable'}
+        </Text>
+      </Text>
+      {queue.length === 0 && <Text dimColor>Nothing queued.</Text>}
+      {queue.map((t, i) => (
+        <Box key={`q${t.number}`}>
+          {titleRow(
+            <Text>
+              <Text dimColor>{i + 1}. </Text>
+              <Text bold>#{t.number}</Text> {t.title}
+              {t.blockers.length > 0 ? <Text color="red"> ⛔ waits on {t.blockers.map(n => `#${n}`).join(' ')}</Text> : null}
+            </Text>,
+            <Text color={STAGE_LOOK[t.stage].color}>
+              {t.priority < 2 ? <Text color="red">{t.priority === 0 ? '!! ' : '! '}</Text> : null}
+              {STAGE_LOOK[t.stage].short}
+              {sizeTag(t)}
+            </Text>,
+          )}
+        </Box>
+      ))}
+    </Box>
+  )
+
   const needsYou = (
     <Box flexDirection="column" marginTop={1}>
       <Text>
@@ -258,6 +292,7 @@ export async function renderPane($: EngineInterface, ui: UiKit, rows: number): P
       <Box flexDirection="column" marginTop={1}>
         {SECTIONS.map(section)}
       </Box>
+      {comingUp}
     </Box>
   )
 }
