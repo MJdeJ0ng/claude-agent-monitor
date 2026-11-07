@@ -3,8 +3,8 @@ import type { Board, Checks, Issue, Pr, SessionInfo, Stage, Ticket } from '../ty
 // Pure logic: turn gh's JSON and the app's session list into tickets, each
 // at one stage of the pipeline, with what waits on the person.
 
-// Closed tickets stay on the board this long (ms).
-export const MERGED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+// Closed tickets stay on the board this long (ms): one day.
+export const MERGED_WINDOW_MS = 24 * 60 * 60 * 1000
 
 const FAILED = ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']
 const PENDING = ['PENDING', 'EXPECTED', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'REQUESTED']

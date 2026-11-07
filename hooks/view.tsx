@@ -30,7 +30,7 @@ export const STAGE_LOOK: Record<Stage, StageLook> = {
   building: { label: 'Building', short: 'build', glyph: '◑', color: 'yellow' },
   pr: { label: 'In review (PR)', short: 'PR', glyph: '◕', color: 'magenta' },
   ready: { label: 'Ready to merge', short: 'ready', glyph: '●', color: 'green' },
-  merged: { label: 'Merged, last 7 days', short: 'merged', glyph: '✔', color: 'green' },
+  merged: { label: 'Merged, last 24h', short: 'merged', glyph: '✔', color: 'green' },
 }
 
 // Top to bottom: done first, then each step back towards what is coming up.

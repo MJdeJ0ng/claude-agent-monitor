@@ -50,7 +50,7 @@ export const demoBoard = (now: number): Board => ({
     issue(133, 'BOM view', ['refined', 'size:5'], 0.5, now),
     issue(140, 'Placed items take the default offering', ['refined', 'size:3'], 1.5, now),
     issue(141, 'Landing page layout', ['refined', 'size:3'], 4, now),
-    issue(150, 'Account and login', ['refined', 'size:5'], 18, now, true),
+    issue(150, 'Account and login', ['refined', 'size:5'], 6, now, true),
     issue(151, 'Design base', ['refined', 'size:2'], 40, now, true),
   ],
   prs: [
@@ -60,7 +60,7 @@ export const demoBoard = (now: number): Board => ({
     pr(204, 133, 'bom-view', { isDraft: true, checks: 'pending' }, 0.1, now),
     pr(205, 140, 'default-offering', {}, 0.8, now),
     pr(206, 141, 'landing-layout', { state: 'MERGED', mergeable: 'UNKNOWN' }, 2, now),
-    pr(207, 150, 'account-and-login', { state: 'MERGED', mergeable: 'UNKNOWN' }, 18, now),
+    pr(207, 150, 'account-and-login', { state: 'MERGED', mergeable: 'UNKNOWN' }, 6, now),
     pr(208, 151, 'design-base', { state: 'MERGED', mergeable: 'UNKNOWN' }, 40, now),
   ],
 })

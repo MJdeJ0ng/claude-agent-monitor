@@ -19,7 +19,8 @@ const OPEN = JSON.stringify([
   { number: 8, title: 'Spike on maps', labels: [{ name: 'spike' }], updatedAt: iso(9) },
 ])
 const CLOSED = JSON.stringify([
-  { number: 5, title: 'Old one', labels: [], closedAt: iso(24) },
+  { number: 5, title: 'Old one', labels: [], closedAt: iso(20) },
+  { number: 3, title: 'Yesterday', labels: [], closedAt: iso(30) },
   { number: 4, title: 'Ancient', labels: [], closedAt: iso(24 * 30) },
 ])
 const PRS = JSON.stringify([
@@ -87,6 +88,7 @@ test('puts each ticket at its stage and flags what needs the person', () => {
   expect(at(8)?.stage).toBe('coming-up')
   expect(at(5)?.stage).toBe('merged')
   expect(at(4)).toBeUndefined()
+  expect(at(3)).toBeUndefined()
 })
 
 test('an idle session on a refined ticket asks for the person', () => {
